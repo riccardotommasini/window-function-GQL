@@ -1,0 +1,213 @@
+import type { PlaygroundExample } from "./types";
+
+export const backends = [
+  {
+    id: "apoc",
+    label: "APOC",
+    description: "Rewrites row-window syntax to apoc.window.runRows and executes in Neo4j."
+  },
+  {
+    id: "neo4j-sqlite",
+    label: "Neo4j + SQLite",
+    description: "Runs the graph binding query in Neo4j, then evaluates the window in in-memory SQLite."
+  }
+] as const;
+
+export const examples: PlaygroundExample[] = [
+  {
+    id: "rank-source-node",
+    title: "Rank by source account node",
+    databaseId: "gwl-demo/accounts-transfers",
+    description: "Partitions transfer rows by the bound source account node.",
+    supportedBackends: ["apoc", "neo4j-sqlite"],
+    tags: ["rank", "node partition"],
+    query: `MATCH (a:Account)-[t:TRANSFER]->(b:Account)
+RETURN a.name AS source,
+       b.name AS target,
+       t.amount AS amount,
+       rank() OVER (
+         PARTITION BY a
+         ORDER BY t.amount DESC
+       ) AS rankPerSource
+ORDER BY source, target`
+  },
+  {
+    id: "cumulative-risk-relationship",
+    title: "Cumulative risk by transfer edge",
+    databaseId: "gwl-demo/accounts-currencies",
+    description: "Partitions joined currency rows by the transfer relationship identity.",
+    supportedBackends: ["apoc", "neo4j-sqlite"],
+    tags: ["sum", "relationship partition", "ROWS"],
+    query: `MATCH (a:Account)-[t:TRANSFER]->(b:Account)
+MATCH (b)<-[:ISSUED_FOR]-(c:Currency)
+RETURN a.name AS source,
+       b.name AS target,
+       c.code AS currency,
+       c.risk AS risk,
+       sum(c.risk) OVER (
+         PARTITION BY t
+         ORDER BY c.code ASC
+         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+       ) AS cumulRisk
+ORDER BY source, target, currency`
+  },
+  {
+    id: "path-identity-currency-risk",
+    title: "Path identity as partition key",
+    databaseId: "gwl-demo/transfer-paths",
+    description: "Treats each path binding as an atomic partition key.",
+    supportedBackends: ["apoc", "neo4j-sqlite"],
+    tags: ["sum", "path partition"],
+    query: `MATCH p = (a:Account)-[:TRANSFER*1..4]->(b:Account)
+MATCH (b)<-[:ISSUED_FOR]-(c:Currency)
+RETURN a.name AS source,
+       b.name AS target,
+       length(p) AS pathLength,
+       reduce(pathKey = head(nodes(p)).name, n IN tail(nodes(p)) | pathKey + "->" + n.name) AS pathKey,
+       c.code AS currency,
+       c.risk AS risk,
+       sum(c.risk) OVER (
+         PARTITION BY p
+         ORDER BY c.code ASC
+         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+       ) AS cumulativeRisk
+ORDER BY pathLength, pathKey, currency`
+  },
+  {
+    id: "rank-path-length",
+    title: "Rank path tuples by path length",
+    databaseId: "gwl-demo/transfer-paths",
+    description: "Ranks path bindings by a path-global expression while partitioning by endpoint aliases.",
+    supportedBackends: ["apoc", "neo4j-sqlite"],
+    tags: ["rank", "path binding"],
+    query: `MATCH p = (a:Account)-[:TRANSFER*1..4]->(b:Account)
+RETURN a.name AS source,
+       b.name AS target,
+       length(p) AS pathLength,
+       rank() OVER (
+         PARTITION BY source, target
+         ORDER BY pathLength ASC
+       ) AS pathLengthRank
+ORDER BY source, target, pathLength`
+  },
+  {
+    id: "neighbor-rank-domain",
+    title: "Neighbor rank by source domain",
+    databaseId: "gwl-demo/knows-graph",
+    description: "Partitions by a scalar property projected from the source account.",
+    supportedBackends: ["apoc", "neo4j-sqlite"],
+    tags: ["rank", "scalar partition"],
+    query: `MATCH (u:Account)-[:KNOWS]->(v:Account)
+RETURN u.domain AS sourceDomain,
+       u.name AS source,
+       v.name AS target,
+       v.score AS targetScore,
+       rank() OVER (
+         PARTITION BY sourceDomain
+         ORDER BY targetScore DESC
+       ) AS neighborRank
+ORDER BY sourceDomain, source, target`
+  },
+  {
+    id: "rows-moving-sum",
+    title: "ROWS moving sum",
+    databaseId: "gwl-demo/frame-rows",
+    description: "Uses tuple offsets over a small frame-semantics table.",
+    supportedBackends: ["apoc", "neo4j-sqlite"],
+    tags: ["sum", "ROWS"],
+    query: `MATCH (f:FrameRow)
+RETURN f.name AS name,
+       f.ord AS ord,
+       f.amount AS amount,
+       sum(f.amount) OVER (
+         ORDER BY f.ord ASC
+         ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING
+       ) AS windowSum
+ORDER BY name`
+  },
+  {
+    id: "groups-peer-sum",
+    title: "GROUPS peer sum",
+    databaseId: "gwl-demo/frame-rows",
+    description: "Uses peer groups over equal ordering values.",
+    supportedBackends: ["apoc", "neo4j-sqlite"],
+    tags: ["sum", "GROUPS"],
+    query: `MATCH (f:FrameRow)
+RETURN f.name AS name,
+       f.ord AS ord,
+       f.amount AS amount,
+       sum(f.amount) OVER (
+         ORDER BY f.ord ASC
+         GROUPS BETWEEN 1 PRECEDING AND CURRENT ROW
+       ) AS windowSum
+ORDER BY name`
+  },
+  {
+    id: "range-numeric-sum",
+    title: "Numeric RANGE frame",
+    databaseId: "gwl-demo/frame-rows",
+    description: "Uses a numeric value interval around the current order key.",
+    supportedBackends: ["apoc", "neo4j-sqlite"],
+    tags: ["sum", "RANGE"],
+    query: `MATCH (f:FrameRow)
+RETURN f.name AS name,
+       f.ord AS ord,
+       f.amount AS amount,
+       sum(f.amount) OVER (
+         ORDER BY f.ord ASC
+         RANGE BETWEEN 5 PRECEDING AND 5 FOLLOWING
+       ) AS windowSum
+ORDER BY name`
+  },
+  {
+    id: "exclude-current-row",
+    title: "EXCLUDE CURRENT ROW",
+    databaseId: "gwl-demo/frame-rows",
+    description: "Demonstrates frame exclusion on a prefix frame.",
+    supportedBackends: ["apoc", "neo4j-sqlite"],
+    tags: ["sum", "exclude"],
+    query: `MATCH (f:FrameRow)
+RETURN f.name AS name,
+       f.ord AS ord,
+       f.amount AS amount,
+       sum(f.amount) OVER (
+         ORDER BY f.ord ASC
+         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+         EXCLUDE CURRENT ROW
+       ) AS windowSum
+ORDER BY name`
+  },
+  {
+    id: "temporal-range",
+    title: "Temporal RANGE frame",
+    databaseId: "gwl-demo/temporal-frame-rows",
+    description: "Uses a Neo4j duration offset over date ordering values.",
+    supportedBackends: ["apoc"],
+    tags: ["sum", "RANGE", "temporal"],
+    query: `MATCH (f:TemporalFrameRow)
+RETURN f.name AS name,
+       f.day AS day,
+       f.amount AS amount,
+       sum(f.amount) OVER (
+         ORDER BY f.day ASC
+         RANGE BETWEEN duration('P2D') PRECEDING AND duration('P2D') FOLLOWING
+       ) AS windowSum
+ORDER BY name`
+  },
+  {
+    id: "path-element-preview",
+    title: "Path-element syntax preview",
+    databaseId: "gwl-demo/path-elements",
+    description: "Parses the paper's path-window shape and reports it as unsupported in V1.",
+    supportedBackends: [],
+    tags: ["OVER PATH", "unsupported"],
+    query: `MATCH p = (s:Account)-[:TRANSFER*1..4]->(t:Account)
+RETURN s.name AS source,
+       t.name AS target,
+       sum(e.amount) OVER PATH p EDGES AS e (
+         PARTITION BY p
+         ORDER BY position(e)
+         ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+       ) AS cumulativeDistance`
+  }
+];

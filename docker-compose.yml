@@ -1,0 +1,44 @@
+services:
+  neo:
+    image: ${NEO4J_IMAGE:-neo4j:2026.04.0}
+    platform: ${NEO4J_PLATFORM:-linux/arm64/v8}
+    ports:
+      - 7474:7474
+      - 7687:7687
+    restart: always
+    environment:
+      NEO4J_AUTH: none
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - cypher-shell -a bolt://localhost:7687 "RETURN 1;" >/dev/null 2>&1
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
+    volumes:
+      - ./neo4j/data:/data
+      - ./neo4j/plugins:/plugins
+      - ./neo4j/examples:/neo4j-init:ro
+      - ./neo4j/bin/start-with-examples.sh:/start-with-examples.sh:ro
+    entrypoint:
+      - tini
+      - -g
+      - --
+      - /bin/bash
+      - /start-with-examples.sh
+
+  playground:
+    build:
+      context: ./playground
+    platform: ${PLAYGROUND_PLATFORM:-linux/arm64/v8}
+    ports:
+      - 5174:5174
+    environment:
+      PLAYGROUND_PORT: 5174
+      NEO4J_URI: bolt://neo:7687
+    volumes:
+      - ./neo4j/examples:/neo4j/examples:ro
+    depends_on:
+      neo:
+        condition: service_healthy

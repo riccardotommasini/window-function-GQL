@@ -57,6 +57,11 @@ export interface ProjectionAst {
 export interface WindowExpressionAst {
   functionName: WindowFunctionName;
   inputExpression?: string;
+  path?: {
+    pathVariable: string;
+    elementKind: "EDGES" | "NODES";
+    elementAlias: string;
+  };
   partitionBy: string[];
   orderBy: OrderItem[];
   frame?: FrameSpecAst;
@@ -67,7 +72,7 @@ export interface WindowExpressionAst {
 export interface HiddenColumn {
   alias: string;
   expression: string;
-  role: "partition" | "order" | "input";
+  role: "partition" | "order" | "input" | "path";
 }
 
 export interface WindowSpecLiteral {
@@ -104,16 +109,47 @@ export interface RowWindowParseResult {
   diagnostics: string[];
 }
 
-export interface UnsupportedPathParseResult {
-  kind: "unsupported-path-window";
+export interface PathProjectionSpec {
+  property: string;
+  as: string;
+}
+
+export interface PathSpecLiteral {
+  path: string;
+  elements: "EDGES" | "NODES";
+  elementAlias: string;
+  positionAlias: string;
+  project: PathProjectionSpec[];
+}
+
+export interface PathWindowParseResult {
+  kind: "path-window";
   originalQuery: string;
+  clause: WindowClause;
+  preamble: string;
   pathVariable: string;
   elementKind: "EDGES" | "NODES";
   elementAlias: string;
+  positionAlias: string;
+  projections: ProjectionAst[];
+  visibleProjections: ProjectionAst[];
+  sourceProjections: ProjectionAst[];
+  pathProjections: ProjectionAst[];
+  hiddenSourceColumns: HiddenColumn[];
+  hiddenPathProjections: PathProjectionSpec[];
+  window: WindowExpressionAst;
+  finalOrderBy?: string;
+  finalOrderByItems: OrderItem[];
+  sourceColumns: string[];
+  visibleColumns: string[];
+  sourceQuery: string;
+  apocQuery: string;
+  pathSpec: PathSpecLiteral;
+  spec: WindowSpecLiteral;
   diagnostics: string[];
 }
 
-export type ParseResult = RowWindowParseResult | UnsupportedPathParseResult;
+export type ParseResult = RowWindowParseResult | PathWindowParseResult;
 
 export interface ParseResponse {
   parse: ParseResult;

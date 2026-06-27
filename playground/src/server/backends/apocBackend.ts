@@ -1,11 +1,9 @@
 import { performance } from "node:perf_hooks";
 import { normalizeRecordForJson } from "../normalization";
-import { ensureDemoData } from "../neo4jClient";
 import type { BackendAdapter } from "./types";
 
 export const apocBackend: BackendAdapter = {
   async run(parsed, context) {
-    await ensureDemoData(context.driver);
     const session = context.driver.session();
 
     try {

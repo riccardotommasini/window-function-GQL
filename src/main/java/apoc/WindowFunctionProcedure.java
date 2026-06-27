@@ -1,4 +1,4 @@
-package example;
+package apoc;
 
 import org.neo4j.graphdb.Node;
 import org.neo4j.graphdb.Path;
@@ -87,6 +87,60 @@ public class WindowFunctionProcedure {
         return windowRows(sourceRows, columns, windowSpec, emitPartitionId, ColumnSource.ROWS);
     }
 
+    @Procedure(name = "apoc.window.runPath", mode = Mode.READ)
+    @Description("apoc.window.runPath(sourceQuery, params, pathSpec, spec, includePartitionId = false) expands paths into element rows and appends a window-function result.")
+    public Stream<WindowRowResult> runPath(
+            @Name("sourceQuery") String sourceQuery,
+            @Name("params") Map<String, Object> params,
+            @Name("pathSpec") Map<String, Object> pathSpec,
+            @Name("spec") Map<String, Object> spec,
+            @Name(value = "includePartitionId", defaultValue = "false") Boolean includePartitionId) {
+        if (sourceQuery == null || sourceQuery.isBlank()) {
+            throw new IllegalArgumentException("sourceQuery must not be blank");
+        }
+
+        PathSpec parsedPathSpec = PathSpec.from(pathSpec);
+        WindowSpec windowSpec = WindowSpec.from(spec);
+        Map<String, Object> effectiveParams = params == null ? Map.of() : params;
+        boolean emitPartitionId = Boolean.TRUE.equals(includePartitionId);
+
+        try (Result result = tx.execute(sourceQuery, effectiveParams)) {
+            List<String> columns = List.copyOf(result.columns());
+            parsedPathSpec.validateAgainstColumns(columns, ColumnSource.SOURCE_QUERY);
+
+            List<Map<String, Object>> sourceRows = new ArrayList<>();
+            while (result.hasNext()) {
+                sourceRows.add(result.next());
+            }
+
+            return windowPathRows(sourceRows, columns, parsedPathSpec, windowSpec, emitPartitionId, ColumnSource.SOURCE_QUERY);
+        }
+    }
+
+    @Procedure(name = "apoc.window.runPathRows", mode = Mode.READ)
+    @Description("apoc.window.runPathRows(rows, pathSpec, spec, includePartitionId = false) expands supplied path bindings into element rows and appends a window-function result.")
+    public Stream<WindowRowResult> runPathRows(
+            @Name("rows") List<Map<String, Object>> sourceRows,
+            @Name("pathSpec") Map<String, Object> pathSpec,
+            @Name("spec") Map<String, Object> spec,
+            @Name(value = "includePartitionId", defaultValue = "false") Boolean includePartitionId) {
+        if (sourceRows == null) {
+            throw new IllegalArgumentException("rows must not be null");
+        }
+
+        PathSpec parsedPathSpec = PathSpec.from(pathSpec);
+        WindowSpec windowSpec = WindowSpec.from(spec);
+        boolean emitPartitionId = Boolean.TRUE.equals(includePartitionId);
+        parsedPathSpec.validateAgainstWindowSpec(windowSpec, emitPartitionId);
+        List<String> columns = columnsFromRows(sourceRows);
+        if (sourceRows.isEmpty()) {
+            windowSpec.validateEmptyRows(emitPartitionId);
+            return Stream.empty();
+        }
+
+        return windowPathRows(sourceRows, columns, parsedPathSpec, windowSpec, emitPartitionId, ColumnSource.ROWS);
+    }
+
     private static Stream<WindowRowResult> windowRows(
             List<Map<String, Object>> sourceRows,
             List<String> columns,
@@ -104,6 +158,58 @@ public class WindowFunctionProcedure {
         return rows.stream()
                 .map(row -> row.resultRow(windowSpec.outputAlias, emitPartitionId))
                 .map(WindowRowResult::new);
+    }
+
+    private static Stream<WindowRowResult> windowPathRows(
+            List<Map<String, Object>> sourceRows,
+            List<String> sourceColumns,
+            PathSpec pathSpec,
+            WindowSpec windowSpec,
+            boolean emitPartitionId,
+            ColumnSource columnSource) {
+        pathSpec.validateAgainstWindowSpec(windowSpec, emitPartitionId);
+        List<String> expandedColumns = pathSpec.expandedColumns(sourceColumns, columnSource);
+        if (sourceRows.isEmpty()) {
+            windowSpec.validateAgainstColumns(expandedColumns, emitPartitionId, columnSource);
+            return Stream.empty();
+        }
+
+        List<Map<String, Object>> expandedRows = expandPathRows(sourceRows, pathSpec);
+        if (expandedRows.isEmpty()) {
+            windowSpec.validateAgainstColumns(expandedColumns, emitPartitionId, columnSource);
+            return Stream.empty();
+        }
+
+        return windowRows(expandedRows, expandedColumns, windowSpec, emitPartitionId, columnSource);
+    }
+
+    private static List<Map<String, Object>> expandPathRows(List<Map<String, Object>> sourceRows, PathSpec pathSpec) {
+        List<Map<String, Object>> expandedRows = new ArrayList<>();
+        for (int rowIndex = 0; rowIndex < sourceRows.size(); rowIndex++) {
+            Map<String, Object> sourceRow = requireRow(sourceRows.get(rowIndex), rowIndex);
+            Path path = pathSpec.requirePath(sourceRow, rowIndex);
+            int position = 0;
+            for (Object element : pathSpec.elements.elements(path)) {
+                LinkedHashMap<String, Object> expandedRow = new LinkedHashMap<>(sourceRow);
+                expandedRow.put(pathSpec.elementAlias, element);
+                expandedRow.put(pathSpec.positionAlias, position++);
+                for (PathProjection projection : pathSpec.projections) {
+                    expandedRow.put(projection.alias, projectedProperty(element, projection.property));
+                }
+                expandedRows.add(expandedRow);
+            }
+        }
+        return expandedRows;
+    }
+
+    private static Object projectedProperty(Object element, String property) {
+        if (element instanceof Node node) {
+            return node.getProperty(property, null);
+        }
+        if (element instanceof Relationship relationship) {
+            return relationship.getProperty(property, null);
+        }
+        throw new IllegalArgumentException("path elements must be nodes or relationships");
     }
 
     private static List<String> columnsFromRows(List<Map<String, Object>> sourceRows) {
@@ -536,6 +642,123 @@ public class WindowFunctionProcedure {
         }
     }
 
+    private record PathSpec(
+            String pathAlias,
+            PathElements elements,
+            String elementAlias,
+            String positionAlias,
+            List<PathProjection> projections) {
+
+        private static PathSpec from(Map<String, Object> pathSpec) {
+            if (pathSpec == null || pathSpec.isEmpty()) {
+                throw new IllegalArgumentException("pathSpec must not be empty");
+            }
+
+            PathSpec parsed = new PathSpec(
+                    requiredPathString(pathSpec, "path"),
+                    PathElements.from(pathSpec.get("elements")),
+                    requiredPathString(pathSpec, "elementAlias"),
+                    requiredPathString(pathSpec, "positionAlias"),
+                    pathProjections(pathSpec.get("project")));
+            parsed.validateUniqueAliases();
+            return parsed;
+        }
+
+        private void validateAgainstColumns(List<String> sourceColumns, ColumnSource columnSource) {
+            if (!sourceColumns.contains(pathAlias)) {
+                throw new IllegalArgumentException(
+                        "Unknown path alias '" + pathAlias + "'; " + columnSource.missingAliasHint);
+            }
+
+            Set<String> columns = new LinkedHashSet<>(sourceColumns);
+            for (String alias : outputAliases()) {
+                if (columns.contains(alias)) {
+                    throw new IllegalArgumentException(
+                            "pathSpec alias '" + alias + "' already exists in " + columnSource.label);
+                }
+            }
+        }
+
+        private void validateAgainstWindowSpec(WindowSpec windowSpec, boolean includePartitionId) {
+            for (String alias : outputAliases()) {
+                if (alias.equals(windowSpec.outputAlias())) {
+                    throw new IllegalArgumentException(
+                            "Window output alias '" + alias + "' already exists in pathSpec output aliases");
+                }
+                if (includePartitionId && PARTITION_ID_COLUMN.equals(alias)) {
+                    throw new IllegalArgumentException("pathSpec alias '" + PARTITION_ID_COLUMN + "' is reserved");
+                }
+            }
+        }
+
+        private List<String> expandedColumns(List<String> sourceColumns, ColumnSource columnSource) {
+            validateAgainstColumns(sourceColumns, columnSource);
+            LinkedHashSet<String> columns = new LinkedHashSet<>(sourceColumns);
+            columns.addAll(outputAliases());
+            return List.copyOf(columns);
+        }
+
+        private Path requirePath(Map<String, Object> row, int rowIndex) {
+            Object pathValue = row.get(pathAlias);
+            if (!(pathValue instanceof Path path)) {
+                throw new IllegalArgumentException(
+                        "Path alias '" + pathAlias + "' in rows[" + rowIndex + "] must contain a path");
+            }
+            return path;
+        }
+
+        private List<String> outputAliases() {
+            List<String> aliases = new ArrayList<>(2 + projections.size());
+            aliases.add(elementAlias);
+            aliases.add(positionAlias);
+            for (PathProjection projection : projections) {
+                aliases.add(projection.alias);
+            }
+            return aliases;
+        }
+
+        private void validateUniqueAliases() {
+            Set<String> aliases = new LinkedHashSet<>();
+            for (String alias : outputAliases()) {
+                if (!aliases.add(alias)) {
+                    throw new IllegalArgumentException("pathSpec aliases must be unique; duplicate alias '" + alias + "'");
+                }
+            }
+        }
+    }
+
+    private enum PathElements {
+        EDGES {
+            @Override
+            Iterable<?> elements(Path path) {
+                return path.relationships();
+            }
+        },
+        NODES {
+            @Override
+            Iterable<?> elements(Path path) {
+                return path.nodes();
+            }
+        };
+
+        abstract Iterable<?> elements(Path path);
+
+        private static PathElements from(Object value) {
+            if (!(value instanceof String rawElements) || rawElements.isBlank()) {
+                throw new IllegalArgumentException("pathSpec.elements must be EDGES or NODES");
+            }
+
+            return switch (normalizeToken(rawElements)) {
+                case "EDGES" -> EDGES;
+                case "NODES" -> NODES;
+                default -> throw new IllegalArgumentException("pathSpec.elements must be EDGES or NODES");
+            };
+        }
+    }
+
+    private record PathProjection(String property, String alias) {
+    }
+
     private record WindowSpec(
             WindowFunction function,
             String outputAlias,
@@ -948,6 +1171,14 @@ public class WindowFunctionProcedure {
         return stringValue;
     }
 
+    private static String requiredPathString(Map<String, Object> map, String key) {
+        Object value = map.get(key);
+        if (!(value instanceof String stringValue) || stringValue.isBlank()) {
+            throw new IllegalArgumentException("pathSpec." + key + " must be provided");
+        }
+        return stringValue;
+    }
+
     private static List<String> stringList(Object value) {
         if (value == null) {
             return List.of();
@@ -962,6 +1193,27 @@ public class WindowFunctionProcedure {
                 throw new IllegalArgumentException("spec.partitionBy must be a list of strings");
             }
             result.add(stringItem);
+        }
+        return List.copyOf(result);
+    }
+
+    private static List<PathProjection> pathProjections(Object value) {
+        if (value == null) {
+            return List.of();
+        }
+        if (!(value instanceof List<?> list)) {
+            throw new IllegalArgumentException("pathSpec.project must be a list");
+        }
+
+        List<PathProjection> result = new ArrayList<>(list.size());
+        for (Object entry : list) {
+            if (!(entry instanceof Map<?, ?> rawProjection)) {
+                throw new IllegalArgumentException("pathSpec.project entries must be maps");
+            }
+            Map<String, Object> projection = castMap(rawProjection, "pathSpec.project entry");
+            result.add(new PathProjection(
+                    requiredPathString(projection, "property"),
+                    requiredPathString(projection, "as")));
         }
         return List.copyOf(result);
     }

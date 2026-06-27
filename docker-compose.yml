@@ -37,8 +37,10 @@ services:
     environment:
       PLAYGROUND_PORT: 5174
       NEO4J_URI: bolt://neo:7687
+      PLAYGROUND_EXAMPLES_FILE: /app/examples.yaml
     volumes:
       - ./neo4j/examples:/neo4j/examples:ro
+      - ./playground/examples.yaml:/app/examples.yaml:ro
     depends_on:
       neo:
         condition: service_healthy

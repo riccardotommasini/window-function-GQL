@@ -19,7 +19,8 @@
     "neo4j-driver": "^6.0.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "sql.js": "^1.13.0"
+    "sql.js": "^1.13.0",
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "^6.9.1",

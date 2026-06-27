@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Braces, CheckCircle2, Database, Play, RotateCcw, Table2 } from "lucide-react";
+import { AlertTriangle, Braces, CheckCircle2, Database, Play, RefreshCw, RotateCcw, Table2 } from "lucide-react";
 import { fetchBackends, fetchExamples, parseQuery, runQuery } from "./api";
 import type { BackendId, BackendInfo, ParseResult, PlaygroundExample, RunResponse } from "../shared/types";
 import { EditorPanel } from "./components/EditorPanel";
@@ -22,6 +22,7 @@ export function App() {
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [isParsing, setIsParsing] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  const [isReloadingExamples, setIsReloadingExamples] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -32,12 +33,10 @@ export function App() {
         }
         setExamples(loadedExamples);
         setBackends(loadedBackends);
-        const firstExample = loadedExamples[0];
-        if (firstExample) {
-          setSelectedExampleId(firstExample.id);
-          setQuery(firstExample.query);
-          setBackendId(firstExample.supportedBackends[0] ?? "apoc");
-        }
+        const nextSelection = resolveExampleSelection(loadedExamples, "", "apoc");
+        setSelectedExampleId(nextSelection.selectedExampleId);
+        setQuery(nextSelection.query);
+        setBackendId(nextSelection.backendId);
         setLoadState("idle");
       })
       .catch((error: unknown) => {
@@ -52,6 +51,26 @@ export function App() {
       isMounted = false;
     };
   }, []);
+
+  const reloadExamples = useCallback(() => {
+    setIsReloadingExamples(true);
+    setStatus("Reloading examples");
+    fetchExamples()
+      .then((loadedExamples) => {
+        const nextSelection = resolveExampleSelection(loadedExamples, selectedExampleId, backendId);
+        setExamples(loadedExamples);
+        setSelectedExampleId(nextSelection.selectedExampleId);
+        setQuery(nextSelection.query);
+        setBackendId(nextSelection.backendId);
+        setRunResult(null);
+        setLoadState("idle");
+        setStatus(`Reloaded ${loadedExamples.length} quer${loadedExamples.length === 1 ? "y" : "ies"} from YAML`);
+      })
+      .catch((error: unknown) => {
+        setStatus(error instanceof Error ? error.message : "Failed to reload examples.");
+      })
+      .finally(() => setIsReloadingExamples(false));
+  }, [backendId, selectedExampleId]);
 
   useEffect(() => {
     if (!query.trim()) {
@@ -90,16 +109,46 @@ export function App() {
     };
   }, [query]);
 
+  useEffect(() => {
+    setRunResult(null);
+  }, [query]);
+
   const selectedExample = useMemo(
     () => examples.find((example) => example.id === selectedExampleId) ?? null,
     [examples, selectedExampleId]
   );
 
   const backendSupport = selectedExample?.supportedBackends ?? ["apoc", "neo4j-sqlite"];
-  const activeRewrite = runResult?.rewrite ?? (parseResult?.kind === "row-window" ? parseResult.apocQuery : "");
-  const sqliteSql = runResult?.sqliteSql ?? (parseResult?.kind === "row-window" ? parseResult.sqliteSql : undefined);
-  const diagnostics = parseResult?.diagnostics ?? [];
-  const canRun = parseResult?.kind === "row-window" && !isRunning && backendSupport.includes(backendId);
+  const selectedBackendIsSqlite = backendId === "neo4j-sqlite";
+  const sqliteUnsupportedPath = selectedBackendIsSqlite && parseResult?.kind === "path-window";
+  const parsedRewrite =
+    parseResult?.kind === "row-window"
+      ? selectedBackendIsSqlite
+        ? parseResult.sourceQuery
+        : parseResult.apocQuery
+      : parseResult?.kind === "path-window"
+        ? selectedBackendIsSqlite
+          ? ""
+          : parseResult.apocQuery
+        : "";
+  const activeRewrite = runResult?.rewrite ?? parsedRewrite;
+  const sqliteSql =
+    selectedBackendIsSqlite && parseResult?.kind === "row-window"
+      ? (runResult?.sqliteSql ?? parseResult.sqliteSql)
+      : undefined;
+  const rewriteTitle = sqliteUnsupportedPath
+    ? "Unsupported Backend"
+    : selectedBackendIsSqlite
+      ? "Neo4j Source Query"
+      : "APOC Rewrite";
+  const diagnostics = sqliteUnsupportedPath
+    ? ["Path-element windows are supported by the APOC backend only."]
+    : (parseResult?.diagnostics ?? []);
+  const canRun =
+    (parseResult?.kind === "row-window" || parseResult?.kind === "path-window") &&
+    !isRunning &&
+    backendSupport.includes(backendId) &&
+    !sqliteUnsupportedPath;
 
   const selectExample = useCallback(
     (exampleId: string) => {
@@ -174,7 +223,10 @@ export function App() {
                   type="button"
                   className={backendId === backend.id ? "active" : ""}
                   disabled={disabled}
-                  onClick={() => setBackendId(backend.id)}
+                  onClick={() => {
+                    setBackendId(backend.id);
+                    setRunResult(null);
+                  }}
                   title={backend.description}
                 >
                   {backend.label}
@@ -185,6 +237,16 @@ export function App() {
           <button className="icon-button subtle" type="button" onClick={resetExample} title="Reset example">
             <RotateCcw aria-hidden="true" size={16} />
             <span>Reset</span>
+          </button>
+          <button
+            className="icon-button subtle"
+            type="button"
+            onClick={reloadExamples}
+            disabled={loadState === "loading" || isReloadingExamples}
+            title="Reload examples from YAML"
+          >
+            <RefreshCw aria-hidden="true" size={16} />
+            <span>{isReloadingExamples ? "Reloading" : "Reload"}</span>
           </button>
           <button className="run-button" type="button" onClick={execute} disabled={!canRun}>
             <Play aria-hidden="true" size={17} fill="currentColor" />
@@ -221,10 +283,17 @@ export function App() {
         <EditorPanel value={query} onChange={setQuery} disabled={loadState === "loading"} />
         <div className="right-rail">
           <RewritePanel
+            title={rewriteTitle}
             rewrite={activeRewrite}
-            sqliteSql={backendId === "neo4j-sqlite" ? sqliteSql : undefined}
+            emptyText={
+              backendId === "neo4j-sqlite"
+                ? "Waiting for a row-window query that can be translated to SQLite."
+                : undefined
+            }
+            sqliteSql={sqliteSql}
             diagnostics={diagnostics}
             parseKind={parseResult?.kind}
+            showDiagnostics={sqliteUnsupportedPath}
           />
           <section className="panel results-panel" aria-labelledby="results-title">
             <div className="panel-header">
@@ -240,4 +309,28 @@ export function App() {
       </section>
     </main>
   );
+}
+
+function resolveExampleSelection(
+  loadedExamples: PlaygroundExample[],
+  preferredExampleId: string,
+  preferredBackendId: BackendId
+) {
+  const selectedExample =
+    loadedExamples.find((example) => example.id === preferredExampleId) ?? loadedExamples[0] ?? null;
+  if (!selectedExample) {
+    return {
+      selectedExampleId: "",
+      backendId: preferredBackendId,
+      query: ""
+    };
+  }
+
+  return {
+    selectedExampleId: selectedExample.id,
+    backendId: selectedExample.supportedBackends.includes(preferredBackendId)
+      ? preferredBackendId
+      : (selectedExample.supportedBackends[0] ?? "apoc"),
+    query: selectedExample.query
+  };
 }

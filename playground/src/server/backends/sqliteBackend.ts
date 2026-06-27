@@ -4,7 +4,6 @@ import initSqlJs, { type Database, type SqlJsStatic } from "sql.js";
 import { quoteSqlIdentifier } from "../../shared/rewrite";
 import type { RowWindowParseResult, RunResponse, WindowSpecLiteral } from "../../shared/types";
 import { normalizeRecordForSqlite } from "../normalization";
-import { ensureDemoData } from "../neo4jClient";
 import type { BackendAdapter } from "./types";
 
 const require = createRequire(import.meta.url);
@@ -13,8 +12,11 @@ type SqlValue = string | number | Uint8Array | null;
 
 export const sqliteBackend: BackendAdapter = {
   async run(parsed, context) {
+    if (parsed.kind !== "row-window") {
+      throw new Error("Path-element windows are supported by the APOC backend only.");
+    }
+
     assertSqliteCompatible(parsed.spec);
-    await ensureDemoData(context.driver);
     const session = context.driver.session();
 
     try {
@@ -34,7 +36,7 @@ export const sqliteBackend: BackendAdapter = {
 
       return {
         backendId: "neo4j-sqlite",
-        rewrite: parsed.apocQuery,
+        rewrite: parsed.sourceQuery,
         sourceQuery: parsed.sourceQuery,
         sqliteSql: parsed.sqliteSql,
         columns: parsed.visibleColumns,

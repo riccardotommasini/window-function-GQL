@@ -7,7 +7,7 @@ import type {
 } from "../shared/types";
 
 export async function fetchExamples() {
-  const payload = await requestJson<{ examples: PlaygroundExample[] }>("/api/examples");
+  const payload = await requestJson<{ examples: PlaygroundExample[] }>("/api/examples", { cache: "no-store" });
   return payload.examples;
 }
 

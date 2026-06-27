@@ -1,4 +1,4 @@
-package example;
+package apoc;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -585,6 +585,128 @@ class WindowFunctionProcedureTest {
     }
 
     @Test
+    void runPathRowsComputesCumulativeRelationshipAmountsOverEdges() {
+        try (Session session = driver.session()) {
+            createPathWindowGraph(session);
+
+            Map<String, Object> pathSpec = pathSpec(
+                    "p",
+                    "EDGES",
+                    "e",
+                    "position",
+                    List.of(project("amount", "amount")));
+            Map<String, Object> spec = spec(
+                    "sum",
+                    "cumulativeDistance",
+                    "amount",
+                    List.of("p"),
+                    List.of(orderBy("position", "ASC")),
+                    rowsFrame());
+
+            List<Value> rows = session.run("""
+                            MATCH p = (s:PathAccount {name: 'A'})-[:TRANSFER*1..3]->(t:PathAccount)
+                            WITH {p: p, source: s.name, target: t.name} AS binding
+                            ORDER BY binding.target
+                            WITH collect(binding) AS rows
+                            CALL apoc.window.runPathRows(rows, $pathSpec, $spec)
+                            YIELD row
+                            RETURN row
+                            ORDER BY row.target, row.position
+                            """,
+                    Map.of("pathSpec", pathSpec, "spec", spec))
+                    .list(record -> record.get("row"));
+
+            assertThat(lines(rows, "source", "target", "position", "amount", "cumulativeDistance"))
+                    .containsExactly(
+                            "A|B|0|10|10",
+                            "A|C|0|10|10",
+                            "A|C|1|20|30",
+                            "A|D|0|10|10",
+                            "A|D|1|20|30",
+                            "A|D|2|30|60");
+        }
+    }
+
+    @Test
+    void runPathComputesCumulativeNodeScoresOverNodes() {
+        try (Session session = driver.session()) {
+            createPathWindowGraph(session);
+
+            String sourceQuery = """
+                    MATCH p = (s:PathAccount {name: 'A'})-[:TRANSFER*2]->(t:PathAccount)
+                    RETURN p, s.name AS source, t.name AS target
+                    """;
+            Map<String, Object> pathSpec = pathSpec(
+                    "p",
+                    "NODES",
+                    "n",
+                    "position",
+                    List.of(project("score", "score")));
+            Map<String, Object> spec = spec(
+                    "sum",
+                    "cumulativeScore",
+                    "score",
+                    List.of("p"),
+                    List.of(orderBy("position", "ASC")),
+                    rowsFrame());
+
+            List<Value> rows = runPath(session, sourceQuery, Map.of(), pathSpec, spec);
+
+            assertThat(lines(rows, "source", "target", "position", "score", "cumulativeScore"))
+                    .containsExactly(
+                            "A|C|0|1|1",
+                            "A|C|1|2|3",
+                            "A|C|2|3|6");
+        }
+    }
+
+    @Test
+    void runPathHandlesZeroLengthPathsForEdgesAndNodes() {
+        try (Session session = driver.session()) {
+            createPathWindowGraph(session);
+
+            String sourceQuery = """
+                    MATCH p = (s:PathAccount {name: 'A'})
+                    RETURN p, s.name AS source
+                    """;
+            Map<String, Object> edgePathSpec = pathSpec(
+                    "p",
+                    "EDGES",
+                    "e",
+                    "position",
+                    List.of(project("amount", "amount")));
+            Map<String, Object> edgeSpec = spec(
+                    "row_number",
+                    "edgeIndex",
+                    null,
+                    List.of("p"),
+                    List.of(orderBy("position", "ASC")),
+                    null);
+
+            assertThat(runPath(session, sourceQuery, Map.of(), edgePathSpec, edgeSpec)).isEmpty();
+
+            Map<String, Object> nodePathSpec = pathSpec(
+                    "p",
+                    "NODES",
+                    "n",
+                    "position",
+                    List.of(project("score", "score")));
+            Map<String, Object> nodeSpec = spec(
+                    "sum",
+                    "nodeTotal",
+                    "score",
+                    List.of("p"),
+                    List.of(orderBy("position", "ASC")),
+                    rowsFrame());
+
+            List<Value> rows = runPath(session, sourceQuery, Map.of(), nodePathSpec, nodeSpec);
+
+            assertThat(lines(rows, "source", "position", "score", "nodeTotal"))
+                    .containsExactly("A|0|1|1");
+        }
+    }
+
+    @Test
     void rejectsUnknownFunction() {
         try (Session session = driver.session()) {
             Map<String, Object> spec = spec(
@@ -824,6 +946,166 @@ class WindowFunctionProcedureTest {
             List<Value> rows = runWindowRows(session, List.of(), spec);
 
             assertThat(rows).isEmpty();
+        }
+    }
+
+    @Test
+    void runPathRowsRejectsAliasCollisions() {
+        try (Session session = driver.session()) {
+            Map<String, Object> pathSpec = pathSpec(
+                    "p",
+                    "EDGES",
+                    "source",
+                    "position",
+                    List.of());
+            Map<String, Object> spec = spec(
+                    "row_number",
+                    "edgeIndex",
+                    null,
+                    List.of("p"),
+                    List.of(orderBy("position", "ASC")),
+                    null);
+
+            assertThatThrownBy(() -> runPathRows(
+                    session,
+                    List.of(Map.of("p", "not-a-path", "source", "A")),
+                    pathSpec,
+                    spec))
+                    .isInstanceOf(ClientException.class)
+                    .hasMessageContaining("pathSpec alias 'source' already exists in rows");
+        }
+    }
+
+    @Test
+    void runPathRowsRejectsInvalidPathAlias() {
+        try (Session session = driver.session()) {
+            Map<String, Object> pathSpec = pathSpec(
+                    "missingPath",
+                    "EDGES",
+                    "e",
+                    "position",
+                    List.of());
+            Map<String, Object> spec = spec(
+                    "row_number",
+                    "edgeIndex",
+                    null,
+                    List.of("missingPath"),
+                    List.of(orderBy("position", "ASC")),
+                    null);
+
+            assertThatThrownBy(() -> runPathRows(session, List.of(Map.of("p", "not-a-path")), pathSpec, spec))
+                    .isInstanceOf(ClientException.class)
+                    .hasMessageContaining("Unknown path alias 'missingPath'")
+                    .hasMessageContaining("include it in rows first");
+        }
+    }
+
+    @Test
+    void runPathRowsRejectsNonPathValues() {
+        try (Session session = driver.session()) {
+            Map<String, Object> pathSpec = pathSpec(
+                    "p",
+                    "EDGES",
+                    "e",
+                    "position",
+                    List.of());
+            Map<String, Object> spec = spec(
+                    "row_number",
+                    "edgeIndex",
+                    null,
+                    List.of("p"),
+                    List.of(orderBy("position", "ASC")),
+                    null);
+
+            assertThatThrownBy(() -> runPathRows(session, List.of(Map.of("p", "not-a-path")), pathSpec, spec))
+                    .isInstanceOf(ClientException.class)
+                    .hasMessageContaining("Path alias 'p' in rows[0] must contain a path");
+        }
+    }
+
+    @Test
+    void runPathRowsRejectsInvalidElementMode() {
+        try (Session session = driver.session()) {
+            Map<String, Object> pathSpec = pathSpec(
+                    "p",
+                    "VERTICES",
+                    "e",
+                    "position",
+                    List.of());
+            Map<String, Object> spec = spec(
+                    "row_number",
+                    "edgeIndex",
+                    null,
+                    List.of("p"),
+                    List.of(orderBy("position", "ASC")),
+                    null);
+
+            assertThatThrownBy(() -> runPathRows(session, List.of(), pathSpec, spec))
+                    .isInstanceOf(ClientException.class)
+                    .hasMessageContaining("pathSpec.elements must be EDGES or NODES");
+        }
+    }
+
+    @Test
+    void runPathRowsProjectsMissingPropertiesAsNull() {
+        try (Session session = driver.session()) {
+            createPathWindowGraph(session);
+
+            Map<String, Object> pathSpec = pathSpec(
+                    "p",
+                    "EDGES",
+                    "e",
+                    "position",
+                    List.of(project("missing", "amount")));
+            Map<String, Object> spec = spec(
+                    "sum",
+                    "cumulativeDistance",
+                    "amount",
+                    List.of("p"),
+                    List.of(orderBy("position", "ASC")),
+                    rowsFrame());
+
+            List<Value> rows = session.run("""
+                            MATCH p = (s:PathAccount {name: 'A'})-[:TRANSFER*1]->(t:PathAccount)
+                            WITH collect({p: p, source: s.name, target: t.name}) AS rows
+                            CALL apoc.window.runPathRows(rows, $pathSpec, $spec)
+                            YIELD row
+                            RETURN row
+                            """,
+                    Map.of("pathSpec", pathSpec, "spec", spec))
+                    .list(record -> record.get("row"));
+
+            assertThat(lines(rows, "target", "position", "amount", "cumulativeDistance"))
+                    .containsExactly("B|0|null|null");
+        }
+    }
+
+    @Test
+    void runPathRejectsNonNumericProjectedPropertiesForSum() {
+        try (Session session = driver.session()) {
+            createPathWindowGraph(session);
+
+            String sourceQuery = """
+                    MATCH p = (s:PathAccount {name: 'A'})-[:TRANSFER*1]->(t:PathAccount)
+                    RETURN p, s.name AS source, t.name AS target
+                    """;
+            Map<String, Object> pathSpec = pathSpec(
+                    "p",
+                    "EDGES",
+                    "e",
+                    "position",
+                    List.of(project("currency", "amount")));
+            Map<String, Object> spec = spec(
+                    "sum",
+                    "cumulativeDistance",
+                    "amount",
+                    List.of("p"),
+                    List.of(orderBy("position", "ASC")),
+                    rowsFrame());
+
+            assertThatThrownBy(() -> runPath(session, sourceQuery, Map.of(), pathSpec, spec))
+                    .isInstanceOf(ClientException.class)
+                    .hasMessageContaining("Window input 'amount' must be numeric for sum()");
         }
     }
 
@@ -1190,6 +1472,18 @@ class WindowFunctionProcedureTest {
                 """);
     }
 
+    private void createPathWindowGraph(Session session) {
+        session.run("""
+                CREATE (a:PathAccount {name: 'A', score: 1})
+                CREATE (b:PathAccount {name: 'B', score: 2})
+                CREATE (c:PathAccount {name: 'C', score: 3})
+                CREATE (d:PathAccount {name: 'D', score: 4})
+                CREATE (a)-[:TRANSFER {amount: 10, currency: 'USD'}]->(b)
+                CREATE (b)-[:TRANSFER {amount: 20, currency: 'EUR'}]->(c)
+                CREATE (c)-[:TRANSFER {amount: 30, currency: 'GBP'}]->(d)
+                """);
+    }
+
     private List<Value> runWindow(Session session, String sourceQuery, Map<String, Object> params, Map<String, Object> spec) {
         return runWindow(session, sourceQuery, params, spec, false);
     }
@@ -1234,6 +1528,63 @@ class WindowFunctionProcedureTest {
                 .list(record -> record.get("row"));
     }
 
+    private List<Value> runPath(
+            Session session,
+            String sourceQuery,
+            Map<String, Object> params,
+            Map<String, Object> pathSpec,
+            Map<String, Object> spec) {
+        return runPath(session, sourceQuery, params, pathSpec, spec, false);
+    }
+
+    private List<Value> runPath(
+            Session session,
+            String sourceQuery,
+            Map<String, Object> params,
+            Map<String, Object> pathSpec,
+            Map<String, Object> spec,
+            boolean includePartitionId) {
+        return session.run("""
+                        CALL apoc.window.runPath($sourceQuery, $params, $pathSpec, $spec, $includePartitionId)
+                        YIELD row
+                        RETURN row
+                        """,
+                Map.of(
+                        "sourceQuery", sourceQuery,
+                        "params", params,
+                        "pathSpec", pathSpec,
+                        "spec", spec,
+                        "includePartitionId", includePartitionId))
+                .list(record -> record.get("row"));
+    }
+
+    private List<Value> runPathRows(
+            Session session,
+            List<Map<String, Object>> rows,
+            Map<String, Object> pathSpec,
+            Map<String, Object> spec) {
+        return runPathRows(session, rows, pathSpec, spec, false);
+    }
+
+    private List<Value> runPathRows(
+            Session session,
+            List<Map<String, Object>> rows,
+            Map<String, Object> pathSpec,
+            Map<String, Object> spec,
+            boolean includePartitionId) {
+        return session.run("""
+                        CALL apoc.window.runPathRows($rows, $pathSpec, $spec, $includePartitionId)
+                        YIELD row
+                        RETURN row
+                        """,
+                Map.of(
+                        "rows", rows,
+                        "pathSpec", pathSpec,
+                        "spec", spec,
+                        "includePartitionId", includePartitionId))
+                .list(record -> record.get("row"));
+    }
+
     private void assertTuplePreservation(Session session, String sourceQuery, Map<String, Object> params, List<Value> rows) {
         assertThat(rows).hasSize(session.run(sourceQuery, params).list().size());
     }
@@ -1259,6 +1610,27 @@ class WindowFunctionProcedureTest {
             spec.put("frame", frame);
         }
         return spec;
+    }
+
+    private Map<String, Object> pathSpec(
+            String path,
+            String elements,
+            String elementAlias,
+            String positionAlias,
+            List<Map<String, Object>> project) {
+        LinkedHashMap<String, Object> pathSpec = new LinkedHashMap<>();
+        pathSpec.put("path", path);
+        pathSpec.put("elements", elements);
+        pathSpec.put("elementAlias", elementAlias);
+        pathSpec.put("positionAlias", positionAlias);
+        if (project != null && !project.isEmpty()) {
+            pathSpec.put("project", project);
+        }
+        return pathSpec;
+    }
+
+    private Map<String, Object> project(String property, String as) {
+        return Map.of("property", property, "as", as);
     }
 
     private Map<String, Object> orderBy(String column, String direction) {

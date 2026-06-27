@@ -1,11 +1,12 @@
-# `apoc.window.run` for Neo4j
+# `apoc.window.*` for Neo4j
 
-This project adds read-only Neo4j procedures named `apoc.window.run` and `apoc.window.runRows` that apply SQL-style window functions to Cypher row sets.
+This project adds read-only Neo4j procedures named `apoc.window.run`, `apoc.window.runRows`, `apoc.window.runPath`, and `apoc.window.runPathRows` that apply SQL-style window functions to Cypher row sets and path elements.
 
 The current implementation supports:
 
 - functions: `sum`, `rank`, `row_number`
 - partition keys over projected scalar, node, relationship, and path values
+- path-element windows over path `EDGES` and `NODES`
 - `ORDER BY` over projected columns
 - frame modes: `ROWS`, `RANGE`, `GROUPS`
 - frame boundaries:
@@ -65,7 +66,7 @@ dbms.security.procedures.allowlist=apoc.window.run,apoc.window.*
 
 ```cypher
 SHOW PROCEDURES YIELD name, signature
-WHERE name IN ['apoc.window.run', 'apoc.window.runRows']
+WHERE name IN ['apoc.window.run', 'apoc.window.runRows', 'apoc.window.runPath', 'apoc.window.runPathRows']
 RETURN name, signature;
 ```
 
@@ -113,6 +114,29 @@ Return value:
 - If `includePartitionId` is `true`, `row` also includes `partitionId`, a 1-based identifier assigned in first-seen partition order.
 - Empty `rows` returns no output rows after validating the shape of `spec`.
 
+```cypher
+CALL apoc.window.runPath(sourceQuery, params, pathSpec, spec, includePartitionId)
+YIELD row
+RETURN row
+```
+
+```cypher
+CALL apoc.window.runPathRows(rows, pathSpec, spec, includePartitionId)
+YIELD row
+RETURN row
+```
+
+Arguments:
+
+- `sourceQuery` or `rows`: source bindings that include a path alias.
+- `pathSpec`: path expansion specification map.
+- `spec`: window specification map applied after path expansion.
+- `includePartitionId`: optional boolean. When `true`, appends `partitionId` to each output row. Defaults to `false`.
+
+Return value:
+
+- `row`: one row per expanded path element. Each row keeps the source binding columns, adds the path element, zero-based position, projected element properties, and the window output.
+
 ## `spec` Format
 
 ```cypher
@@ -145,6 +169,26 @@ Rules:
 - Temporal `RANGE` offsets use temporal order keys and accept temporal amounts such as `duration('P2D')`.
 - If `frame` is omitted, the default is SQL-style `RANGE BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW`.
 
+## `pathSpec` Format
+
+```cypher
+{
+  path: 'p',
+  elements: 'EDGES' | 'NODES',
+  elementAlias: 'e',
+  positionAlias: 'position',
+  project: [{property: 'amount', as: 'amount'}]
+}
+```
+
+Rules:
+
+- `path` must reference a path alias returned by `sourceQuery` or included in `rows`.
+- `elements: 'EDGES'` expands one output row per relationship; `elements: 'NODES'` expands one output row per node.
+- `positionAlias` is zero-based and ordered from path start to path end.
+- `project` copies direct element properties into aliases; arbitrary Cypher expressions are not evaluated inside `pathSpec`.
+- Path aliases, element aliases, position aliases, projected aliases, `spec.as`, and `partitionId` must not collide.
+
 ## Binding Rows API
 
 Use `apoc.window.runRows` when you want the source Cypher to stay outside the procedure call. Build each binding as a map, order the bindings, collect them, and pass the list into the procedure.
@@ -166,6 +210,75 @@ CALL apoc.window.runRows(
 YIELD row
 RETURN row.source, row.target, row.amount, row.rankPerSource
 ORDER BY row.source, row.target;
+```
+
+## PATH-Element Windows
+
+Use `apoc.window.runPathRows` when you want `OVER PATH p EDGES AS e`-style behavior. This example expands transfer relationships and computes a cumulative amount within each path.
+
+```cypher
+MATCH p = (s:Account)-[:TRANSFER*1..4]->(t:Account)
+WITH {p: p, source: s.name, target: t.name, pathLength: length(p)} AS binding
+ORDER BY binding.pathLength, binding.source, binding.target
+WITH collect(binding) AS rows
+CALL apoc.window.runPathRows(
+  rows,
+  {
+    path: 'p',
+    elements: 'EDGES',
+    elementAlias: 'e',
+    positionAlias: 'position',
+    project: [{property: 'amount', as: 'amount'}]
+  },
+  {
+    function: 'sum',
+    input: 'amount',
+    as: 'cumulativeDistance',
+    partitionBy: ['p'],
+    orderBy: [{column: 'position', direction: 'ASC'}],
+    frame: {
+      mode: 'ROWS',
+      start: 'UNBOUNDED_PRECEDING',
+      end: 'CURRENT_ROW'
+    }
+  }
+)
+YIELD row
+RETURN row.source, row.target, row.position, row.amount, row.cumulativeDistance
+ORDER BY row.source, row.target, row.position;
+```
+
+Use `elements: 'NODES'` for node windows. This example projects `score` from each account node and accumulates it along each path.
+
+```cypher
+CALL apoc.window.runPath(
+  'MATCH p = (s:Account)-[:KNOWS*1..2]->(t:Account)
+   RETURN p, s.name AS source, t.name AS target
+   ORDER BY source, target',
+  {},
+  {
+    path: 'p',
+    elements: 'NODES',
+    elementAlias: 'n',
+    positionAlias: 'position',
+    project: [{property: 'score', as: 'score'}]
+  },
+  {
+    function: 'sum',
+    input: 'score',
+    as: 'cumulativeScore',
+    partitionBy: ['p'],
+    orderBy: [{column: 'position', direction: 'ASC'}],
+    frame: {
+      mode: 'ROWS',
+      start: 'UNBOUNDED_PRECEDING',
+      end: 'CURRENT_ROW'
+    }
+  }
+)
+YIELD row
+RETURN row.source, row.target, row.position, row.score, row.cumulativeScore
+ORDER BY row.source, row.target, row.position;
 ```
 
 ## Example Data: Transfer Graph
@@ -553,7 +666,7 @@ The procedure rejects invalid specifications early. Examples:
 - invalid frame boundary ordering
 - `RANGE` offsets with more than one `orderBy` column
 
-The test suite in `src/test/java/example/WindowFunctionProcedureTest.java` covers the documented examples and validation behavior.
+The test suite in `src/test/java/apoc/WindowFunctionProcedureTest.java` covers the documented examples and validation behavior.
 
 ## Development
 

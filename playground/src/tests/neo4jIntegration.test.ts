@@ -1,8 +1,10 @@
 import neo4j from "neo4j-driver";
 import { describe, expect, test } from "vitest";
-import { examples } from "../shared/examples";
 import { parseWindowQuery } from "../shared/parser";
 import { apocBackend } from "../server/backends/apocBackend";
+import { loadExamples } from "../server/exampleCatalog";
+
+const examples = loadExamples();
 
 describe("local Neo4j integration", () => {
   test(

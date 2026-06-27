@@ -1,4 +1,4 @@
-import { buildRowWindowArtifacts, normalizeExpression } from "./rewrite";
+import { buildPathWindowArtifacts, buildRowWindowArtifacts, normalizeExpression } from "./rewrite";
 import type {
   FrameBoundary,
   FrameExclusion,
@@ -8,7 +8,6 @@ import type {
   ParseResult,
   ProjectionAst,
   SortDirection,
-  UnsupportedPathParseResult,
   WindowClause,
   WindowExpressionAst,
   WindowFunctionName
@@ -35,11 +34,6 @@ export function parseWindowQuery(query: string): ParseResult {
   }
 
   rejectMutatingClauses(originalQuery);
-
-  const pathSyntax = parseUnsupportedPathSyntax(originalQuery);
-  if (pathSyntax) {
-    return pathSyntax;
-  }
 
   const projectionClause = findLastProjectionClause(originalQuery);
   if (!projectionClause) {
@@ -76,6 +70,26 @@ export function parseWindowQuery(query: string): ParseResult {
   const finalOrderByItems = finalOrderBy ? parseOrderItems(finalOrderBy) : [];
   validateFinalOrderBy(finalOrderByItems, visibleProjections, window.alias);
 
+  if (window.path) {
+    try {
+      return buildPathWindowArtifacts({
+        originalQuery,
+        clause,
+        preamble,
+        projections,
+        visibleProjections,
+        window,
+        finalOrderBy,
+        finalOrderByItems,
+        pathVariable: window.path.pathVariable,
+        elementKind: window.path.elementKind,
+        elementAlias: window.path.elementAlias
+      });
+    } catch (error) {
+      throw new PlaygroundParseError(error instanceof Error ? error.message : "Path-window rewrite failed.");
+    }
+  }
+
   return buildRowWindowArtifacts({
     originalQuery,
     clause,
@@ -97,25 +111,6 @@ function rejectMutatingClauses(query: string) {
       ["Only read-only MATCH/WITH/RETURN/ORDER BY style queries are accepted."]
     );
   }
-}
-
-function parseUnsupportedPathSyntax(query: string): UnsupportedPathParseResult | null {
-  const match = query.match(/\bOVER\s+PATH\s+([A-Za-z_][A-Za-z0-9_]*)\s+(EDGES|NODES)\s+AS\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/i);
-  if (!match) {
-    return null;
-  }
-
-  return {
-    kind: "unsupported-path-window",
-    originalQuery: query,
-    pathVariable: match[1],
-    elementKind: match[2].toUpperCase() as "EDGES" | "NODES",
-    elementAlias: match[3],
-    diagnostics: [
-      "Path-element windows are parsed but unsupported by V1 backends.",
-      "Supported execution in V1 is limited to row-based binding-table windows."
-    ]
-  };
 }
 
 function findLastProjectionClause(query: string): { clause: WindowClause; position: number } | null {
@@ -161,14 +156,38 @@ function parseProjection(source: string): ProjectionAst {
 
 function parseWindowExpression(expression: string, alias: string): WindowExpressionAst {
   const trimmed = expression.trim();
+  const pathAggregateMatch = trimmed.match(
+    /^sum\s*\(([\s\S]+)\)\s+OVER\s+PATH\s+([A-Za-z_][A-Za-z0-9_]*)\s+(EDGES|NODES)\s+AS\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([\s\S]*)\)$/i
+  );
+  const pathRankingMatch = trimmed.match(
+    /^(rank|row_number)\s*\(\s*\)\s+OVER\s+PATH\s+([A-Za-z_][A-Za-z0-9_]*)\s+(EDGES|NODES)\s+AS\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([\s\S]*)\)$/i
+  );
   const aggregateMatch = trimmed.match(/^sum\s*\(([\s\S]+)\)\s+OVER\s*\(([\s\S]*)\)$/i);
   const rankingMatch = trimmed.match(/^(rank|row_number)\s*\(\s*\)\s+OVER\s*\(([\s\S]*)\)$/i);
 
   let functionName: WindowFunctionName;
   let inputExpression: string | undefined;
   let overBody: string;
+  let path: WindowExpressionAst["path"];
 
-  if (aggregateMatch) {
+  if (pathAggregateMatch) {
+    functionName = "sum";
+    inputExpression = pathAggregateMatch[1].trim();
+    overBody = pathAggregateMatch[5].trim();
+    path = {
+      pathVariable: pathAggregateMatch[2],
+      elementKind: pathAggregateMatch[3].toUpperCase() as "EDGES" | "NODES",
+      elementAlias: pathAggregateMatch[4]
+    };
+  } else if (pathRankingMatch) {
+    functionName = pathRankingMatch[1].toLowerCase() as WindowFunctionName;
+    overBody = pathRankingMatch[5].trim();
+    path = {
+      pathVariable: pathRankingMatch[2],
+      elementKind: pathRankingMatch[3].toUpperCase() as "EDGES" | "NODES",
+      elementAlias: pathRankingMatch[4]
+    };
+  } else if (aggregateMatch) {
     functionName = "sum";
     inputExpression = aggregateMatch[1].trim();
     overBody = aggregateMatch[2].trim();
@@ -178,7 +197,7 @@ function parseWindowExpression(expression: string, alias: string): WindowExpress
   } else {
     throw new PlaygroundParseError(
       `Unsupported window expression '${trimmed}'.`,
-      ["Supported functions are rank(), row_number(), and sum(expr) with OVER (...)."]
+      ["Supported functions are rank(), row_number(), and sum(expr) with OVER (...) or OVER PATH ... (...)."]
     );
   }
 
@@ -186,6 +205,7 @@ function parseWindowExpression(expression: string, alias: string): WindowExpress
   return {
     functionName,
     inputExpression,
+    path,
     partitionBy: over.partitionBy,
     orderBy: over.orderBy,
     frame: over.frame,

@@ -157,6 +157,11 @@ button {
   border: 1px solid var(--line-strong);
 }
 
+.icon-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .run-button {
   color: #ffffff;
   background: var(--teal);
@@ -316,7 +321,8 @@ button {
 }
 
 .code-editor,
-.code-output {
+.code-output,
+.code-highlight {
   width: 100%;
   min-width: 0;
   flex: 1;
@@ -333,16 +339,90 @@ button {
   letter-spacing: 0;
   overflow: auto;
   white-space: pre;
+  tab-size: 2;
 }
 
 .code-output {
   white-space: pre-wrap;
 }
 
+.rewrite-panel .code-output {
+  white-space: pre;
+}
+
 .code-output.compact {
   max-height: 140px;
   border-top: 1px solid var(--line);
   background: #f7fafb;
+}
+
+.editor-surface {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  background: #fbfcfd;
+  overflow: hidden;
+}
+
+.editor-surface .code-highlight,
+.editor-surface .code-editor {
+  position: absolute;
+  inset: 0;
+}
+
+.editor-surface .code-highlight {
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.editor-surface .code-editor {
+  z-index: 1;
+  color: transparent;
+  background: transparent;
+  caret-color: #12232a;
+  -webkit-text-fill-color: transparent;
+}
+
+.editor-surface .code-editor:disabled {
+  opacity: 1;
+}
+
+.editor-surface .code-editor::selection {
+  color: transparent;
+  background: rgba(0, 108, 103, 0.18);
+}
+
+.tok-keyword {
+  color: #005e8a;
+  font-weight: 760;
+}
+
+.tok-function {
+  color: #7a3eb1;
+  font-weight: 720;
+}
+
+.tok-procedure {
+  color: #006c67;
+  font-weight: 760;
+}
+
+.tok-string {
+  color: #9a4d00;
+}
+
+.tok-number {
+  color: #0c6f45;
+}
+
+.tok-comment {
+  color: #748690;
+  font-style: italic;
+}
+
+.tok-operator {
+  color: #6b7780;
 }
 
 .diagnostic-list {
@@ -518,7 +598,8 @@ td code {
   }
 
   .code-editor,
-  .code-output {
+  .code-output,
+  .code-highlight {
     font-size: 12px;
   }
 }

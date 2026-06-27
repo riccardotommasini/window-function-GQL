@@ -1,10 +1,12 @@
 import type { Driver } from "neo4j-driver";
-import type { RowWindowParseResult, RunResponse } from "../../shared/types";
+import type { PathWindowParseResult, RowWindowParseResult, RunResponse } from "../../shared/types";
+
+export type ExecutableParseResult = RowWindowParseResult | PathWindowParseResult;
 
 export interface BackendContext {
   driver: Driver;
 }
 
 export interface BackendAdapter {
-  run(parsed: RowWindowParseResult, context: BackendContext): Promise<RunResponse>;
+  run(parsed: ExecutableParseResult, context: BackendContext): Promise<RunResponse>;
 }

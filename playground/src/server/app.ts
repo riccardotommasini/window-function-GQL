@@ -1,6 +1,6 @@
 import cors from "cors";
 import express, { type Request, type Response } from "express";
-import { backends, examples } from "../shared/examples";
+import { backends } from "../shared/examples";
 import { parseWindowQuery, PlaygroundParseError } from "../shared/parser";
 import type { ApiErrorResponse, BackendId, RunRequest } from "../shared/types";
 import { getNeo4jDriver } from "./neo4jClient";
@@ -8,6 +8,7 @@ import { apocBackend } from "./backends/apocBackend";
 import { sqliteBackend } from "./backends/sqliteBackend";
 import type { BackendAdapter } from "./backends/types";
 import type { Driver } from "neo4j-driver";
+import { loadExamples } from "./exampleCatalog";
 
 const backendAdapters: Record<BackendId, BackendAdapter> = {
   apoc: apocBackend,
@@ -17,6 +18,7 @@ const backendAdapters: Record<BackendId, BackendAdapter> = {
 interface CreateAppOptions {
   adapters?: Partial<Record<BackendId, BackendAdapter>>;
   driver?: Driver;
+  examplesPath?: string;
 }
 
 export function createApp(options: CreateAppOptions = {}) {
@@ -30,7 +32,12 @@ export function createApp(options: CreateAppOptions = {}) {
   });
 
   app.get("/api/examples", (_request, response) => {
-    response.json({ examples });
+    try {
+      response.setHeader("Cache-Control", "no-store");
+      response.json({ examples: loadExamples(options.examplesPath) });
+    } catch (error) {
+      sendApiError(response, error);
+    }
   });
 
   app.post("/api/parse", (request, response) => {
@@ -52,8 +59,8 @@ export function createApp(options: CreateAppOptions = {}) {
       }
 
       const parsed = parseWindowQuery(query);
-      if (parsed.kind !== "row-window") {
-        throw new PlaygroundParseError("This syntax is parsed but cannot be executed by V1 backends.", parsed.diagnostics);
+      if (parsed.kind === "path-window" && backendId === "neo4j-sqlite") {
+        throw new PlaygroundParseError("Path-element windows are supported by the APOC backend only.");
       }
 
       const result = await adapters[backendId].run(parsed, { driver: options.driver ?? getNeo4jDriver() });

@@ -16,8 +16,8 @@ if (existsSync(distDir)) {
   });
 }
 
-const port = Number(process.env.PLAYGROUND_PORT ?? 5174);
-const server = app.listen(port, () => {
+const port = Number(process.env.PORT ?? process.env.PLAYGROUND_PORT ?? 5174);
+const server = app.listen(port, "0.0.0.0", () => {
   console.log(`GQL Window Playground API listening on http://localhost:${port}`);
 });
 

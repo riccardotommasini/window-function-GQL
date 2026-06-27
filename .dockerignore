@@ -1,0 +1,15 @@
+.git
+.cache
+.cache-main
+.cache-tests
+.DS_Store
+
+target
+out
+logs
+neo4j-home
+neo4j/data
+neo4j/plugins
+
+playground/node_modules
+playground/dist

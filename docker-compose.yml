@@ -1,6 +1,7 @@
 services:
   neo:
-    image: ${NEO4J_IMAGE:-neo4j:2026.04.0}
+    build:
+      context: ./services/neo4j
     platform: ${NEO4J_PLATFORM:-linux/arm64/v8}
     ports:
       - 7474:7474
@@ -17,20 +18,11 @@ services:
       retries: 30
       start_period: 20s
     volumes:
-      - ./neo4j/data:/data
-      - ./neo4j/plugins:/plugins
-      - ./neo4j/examples:/neo4j-init:ro
-      - ./neo4j/bin/start-with-examples.sh:/start-with-examples.sh:ro
-    entrypoint:
-      - tini
-      - -g
-      - --
-      - /bin/bash
-      - /start-with-examples.sh
+      - ./services/neo4j/data:/data
 
   playground:
     build:
-      context: ./playground
+      context: ./services/playground
     platform: ${PLAYGROUND_PLATFORM:-linux/arm64/v8}
     ports:
       - 5174:5174
@@ -39,8 +31,8 @@ services:
       NEO4J_URI: bolt://neo:7687
       PLAYGROUND_EXAMPLES_FILE: /app/examples.yaml
     volumes:
-      - ./neo4j/examples:/neo4j/examples:ro
-      - ./playground/examples.yaml:/app/examples.yaml:ro
+      - ./services/neo4j/examples:/neo4j/examples:ro
+      - ./services/playground/examples.yaml:/app/examples.yaml:ro
     depends_on:
       neo:
         condition: service_healthy

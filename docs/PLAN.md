@@ -24,21 +24,21 @@ RETURN row.source, row.target, row.amount, row.rankPerSource;
 ```
 
 ## Implementation Changes
-- In [WindowFunctionProcedure.java](/Users/rictomm/_Projects/GWL/src/main/java/example/WindowFunctionProcedure.java), add a new `@Procedure(name = "apoc.window.runRows", mode = Mode.READ)` method accepting `List<Map<String,Object>> rows`.
+- In [WindowFunctionProcedure.java](/Users/rictomm/_Projects/GWL/services/neo4j/src/main/java/apoc/WindowFunctionProcedure.java), add a new `@Procedure(name = "apoc.window.runRows", mode = Mode.READ)` method accepting `List<Map<String,Object>> rows`.
 - Extract the shared windowing path so both procedures use the same `WindowSpec` parsing, column validation, `RowState` creation, `applyWindow`, and result-row generation.
 - Infer available columns for `runRows` from the first row’s map keys. Empty `rows` returns an empty stream after validating that `spec` is present and structurally valid.
 - Preserve input row order exactly as received in the collected list; callers control that order with `ORDER BY` before `collect`.
 - Keep reserved alias behavior the same: duplicate `spec.as` is rejected, and `partitionId` conflicts are rejected when `includePartitionId` is true.
 
 ## Tests
-- Add tests in [WindowFunctionProcedureTest.java](/Users/rictomm/_Projects/GWL/src/test/java/example/WindowFunctionProcedureTest.java) proving `runRows` matches existing `run` output for node, relationship, scalar, and path partition examples.
+- Add tests in [WindowFunctionProcedureTest.java](/Users/rictomm/_Projects/GWL/services/neo4j/src/test/java/apoc/WindowFunctionProcedureTest.java) proving `runRows` matches existing `run` output for node, relationship, scalar, and path partition examples.
 - Add coverage for `includePartitionId`, unknown aliases, duplicate output alias, reserved `partitionId`, null rows, and empty rows.
 - Add at least one README-style Cypher test where the query is outside the procedure and the procedure receives `collect(binding)`.
-- Run `./mvnw test`.
+- Run `cd services/neo4j && ./mvnw test`.
 
 ## Docs
 - Update [README.md](/Users/rictomm/_Projects/GWL/README.md) with a new “Binding Rows API” section.
-- Add equivalent examples to [02-window-examples.cypher](/Users/rictomm/_Projects/GWL/neo4j/examples/02-window-examples.cypher), showing the query-outside/procedure-receives-binding pattern.
+- Add equivalent examples to [02-window-examples.cypher](/Users/rictomm/_Projects/GWL/services/neo4j/examples/02-window-examples.cypher), showing the query-outside/procedure-receives-binding pattern.
 
 ## Assumptions
 - The new API name is `apoc.window.runRows`.

@@ -1,5 +1,5 @@
 [build]
-base = "playground"
+base = "services/playground"
 command = "npm run build"
 publish = "dist"
 

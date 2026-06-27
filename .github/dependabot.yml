@@ -1,5 +1,8 @@
 version: 2
 updates:
   - package-ecosystem: maven
-    directory: "/"
+    directory: "/services/neo4j"
+    open-pull-requests-limit: 0
+  - package-ecosystem: npm
+    directory: "/services/playground"
     open-pull-requests-limit: 0

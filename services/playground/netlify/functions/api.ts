@@ -15,6 +15,7 @@ function resolveExamplesPath() {
 
   for (const candidate of [
     resolve(process.cwd(), "examples.yaml"),
+    resolve(process.cwd(), "services/playground/examples.yaml"),
     resolve(process.cwd(), "playground/examples.yaml")
   ]) {
     if (existsSync(candidate)) {

@@ -2,9 +2,9 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PLUGIN_DIR="$REPO_ROOT/neo4j/plugins"
-TARGET_DIR="$REPO_ROOT/target"
+SERVICE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PLUGIN_DIR="$SERVICE_ROOT/plugins"
+TARGET_DIR="$SERVICE_ROOT/target"
 PLUGIN_NAME="apoc-window-run.jar"
 
 if [[ -x /usr/libexec/java_home ]]; then
@@ -25,7 +25,7 @@ fi
 mkdir -p "${PLUGIN_DIR}"
 
 (
-  cd "${REPO_ROOT}"
+  cd "${SERVICE_ROOT}"
   ./mvnw -DskipTests clean package
 )
 

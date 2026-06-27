@@ -31,9 +31,21 @@ The current implementation supports:
 
 The test suite is built around Neo4j Harness `2026.04.0` and the Neo4j Java driver `6.0.4`.
 
+## Repository Layout
+
+```text
+services/
+  neo4j/       Java procedure project plus the Neo4j runtime image
+  playground/  Vite/React playground plus its Express API
+docs/          Planning notes and supporting documentation
+```
+
+The root folder keeps repository-level files only: README, license, Docker Compose, Netlify config, ignore rules, and CI config.
+
 ## Build
 
 ```shell
+cd services/neo4j
 export JAVA_HOME=$(/usr/libexec/java_home -v 21)
 ./mvnw clean package
 ```
@@ -41,7 +53,7 @@ export JAVA_HOME=$(/usr/libexec/java_home -v 21)
 This produces:
 
 ```text
-target/procedure-template-1.0.0-SNAPSHOT.jar
+services/neo4j/target/procedure-template-1.0.0-SNAPSHOT.jar
 ```
 
 ## Deploy Playground To Netlify
@@ -52,7 +64,7 @@ Netlify builds the Vite UI as static files and serves the existing Express API t
 In Netlify, connect this repository and use the checked-in configuration:
 
 ```text
-Base directory: playground
+Base directory: services/playground
 Build command: npm run build
 Publish directory: dist
 Functions directory: netlify/functions
@@ -68,6 +80,21 @@ NEO4J_PASSWORD=<password>
 
 Netlify does not run the local Docker Neo4j service. The configured Neo4j database must be reachable from Netlify, and the APOC window procedure JAR must be installed there for the `apoc` backend.
 
+## Deploy Playground To Railway
+
+Railway does not run `docker-compose.yml` directly as one deployment. Deploy this project as two Railway services in the same project:
+
+1. `playground`: deploy this repository with root directory `services/playground`.
+2. `neo`: deploy this same repository again with root directory `services/neo4j`.
+
+On the `playground` service, set:
+
+```text
+NEO4J_URI=bolt://neo.railway.internal:7687
+```
+
+The `neo` service Dockerfile builds the Java procedure JAR, installs it into Neo4j, and runs the Cypher files in `services/neo4j/examples` on startup. Keep the Neo4j service private unless you explicitly need external Bolt or browser access.
+
 ## Install Into Neo4j
 
 These steps are for a self-managed Neo4j server.
@@ -80,7 +107,7 @@ These steps are for a self-managed Neo4j server.
 6. Verify that the procedure is visible.
 
 ```shell
-cp target/procedure-template-1.0.0-SNAPSHOT.jar $NEO4J_HOME/plugins/
+cp services/neo4j/target/procedure-template-1.0.0-SNAPSHOT.jar $NEO4J_HOME/plugins/
 ```
 
 ```properties
@@ -690,13 +717,14 @@ The procedure rejects invalid specifications early. Examples:
 - invalid frame boundary ordering
 - `RANGE` offsets with more than one `orderBy` column
 
-The test suite in `src/test/java/apoc/WindowFunctionProcedureTest.java` covers the documented examples and validation behavior.
+The test suite in `services/neo4j/src/test/java/apoc/WindowFunctionProcedureTest.java` covers the documented examples and validation behavior.
 
 ## Development
 
 Run the full test suite locally with:
 
 ```shell
+cd services/neo4j
 export JAVA_HOME=$(/usr/libexec/java_home -v 21)
 ./mvnw test
 ```

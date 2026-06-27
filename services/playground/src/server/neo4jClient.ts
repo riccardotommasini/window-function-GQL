@@ -53,7 +53,9 @@ async function seedDemoData(neo4jDriver: Driver) {
 
 function resolveDemoDataPath() {
   for (const candidate of [
+    resolve(process.cwd(), "/neo4j/examples/01-example-data.cypher"),
     resolve(process.cwd(), "../neo4j/examples/01-example-data.cypher"),
+    resolve(process.cwd(), "services/neo4j/examples/01-example-data.cypher"),
     resolve(process.cwd(), "neo4j/examples/01-example-data.cypher")
   ]) {
     if (existsSync(candidate)) {

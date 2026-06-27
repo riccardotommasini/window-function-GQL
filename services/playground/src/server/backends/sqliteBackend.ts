@@ -91,6 +91,7 @@ function getSqlJs() {
 function resolveSqlJsFile(file: string) {
   for (const candidate of [
     resolve(process.cwd(), "node_modules/sql.js/dist", file),
+    resolve(process.cwd(), "services/playground/node_modules/sql.js/dist", file),
     resolve(process.cwd(), "playground/node_modules/sql.js/dist", file)
   ]) {
     if (existsSync(candidate)) {

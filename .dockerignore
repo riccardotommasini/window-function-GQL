@@ -8,8 +8,9 @@ target
 out
 logs
 neo4j-home
-neo4j/data
-neo4j/plugins
+services/neo4j/target
+services/neo4j/data
+services/neo4j/plugins
 
-playground/node_modules
-playground/dist
+services/playground/node_modules
+services/playground/dist

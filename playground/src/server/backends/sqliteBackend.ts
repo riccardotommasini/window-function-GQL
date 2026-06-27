@@ -1,4 +1,6 @@
+import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
+import { resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import initSqlJs, { type Database, type SqlJsStatic } from "sql.js";
 import { quoteSqlIdentifier } from "../../shared/rewrite";
@@ -6,7 +8,7 @@ import type { RowWindowParseResult, RunResponse, WindowSpecLiteral } from "../..
 import { normalizeRecordForSqlite } from "../normalization";
 import type { BackendAdapter } from "./types";
 
-const require = createRequire(import.meta.url);
+const requireFromCwd = createRequire(resolve(process.cwd(), "package.json"));
 let sqlJsPromise: Promise<SqlJsStatic> | null = null;
 type SqlValue = string | number | Uint8Array | null;
 
@@ -81,9 +83,21 @@ export async function runSqliteWindow(
 
 function getSqlJs() {
   sqlJsPromise ??= initSqlJs({
-    locateFile: (file) => require.resolve(`sql.js/dist/${file}`)
+    locateFile: resolveSqlJsFile
   });
   return sqlJsPromise;
+}
+
+function resolveSqlJsFile(file: string) {
+  for (const candidate of [
+    resolve(process.cwd(), "node_modules/sql.js/dist", file),
+    resolve(process.cwd(), "playground/node_modules/sql.js/dist", file)
+  ]) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return requireFromCwd.resolve(`sql.js/dist/${file}`);
 }
 
 function createSourceRowsTable(db: Database, sourceColumns: string[]) {

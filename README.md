@@ -44,6 +44,30 @@ This produces:
 target/procedure-template-1.0.0-SNAPSHOT.jar
 ```
 
+## Deploy Playground To Netlify
+
+The `playground` app is configured for Netlify with `netlify.toml`.
+Netlify builds the Vite UI as static files and serves the existing Express API through a Netlify Function.
+
+In Netlify, connect this repository and use the checked-in configuration:
+
+```text
+Base directory: playground
+Build command: npm run build
+Publish directory: dist
+Functions directory: netlify/functions
+```
+
+Set these environment variables if you want the playground's Run action to execute queries:
+
+```text
+NEO4J_URI=neo4j+s://<your-host>
+NEO4J_USER=<username>
+NEO4J_PASSWORD=<password>
+```
+
+Netlify does not run the local Docker Neo4j service. The configured Neo4j database must be reachable from Netlify, and the APOC window procedure JAR must be installed there for the `apoc` backend.
+
 ## Install Into Neo4j
 
 These steps are for a self-managed Neo4j server.

@@ -1,6 +1,6 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 import neo4j, { type Driver } from "neo4j-driver";
 
 let driver: Driver | null = null;
@@ -37,8 +37,7 @@ async function seedDemoData(neo4jDriver: Driver) {
     return;
   }
 
-  const currentDir = dirname(fileURLToPath(import.meta.url));
-  const cypherPath = resolve(currentDir, "../../../neo4j/examples/01-example-data.cypher");
+  const cypherPath = resolveDemoDataPath();
   const cypher = await readFile(cypherPath, "utf8");
   const statements = splitCypherStatements(cypher);
   const session = neo4jDriver.session();
@@ -50,6 +49,18 @@ async function seedDemoData(neo4jDriver: Driver) {
   } finally {
     await session.close();
   }
+}
+
+function resolveDemoDataPath() {
+  for (const candidate of [
+    resolve(process.cwd(), "../neo4j/examples/01-example-data.cypher"),
+    resolve(process.cwd(), "neo4j/examples/01-example-data.cypher")
+  ]) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return resolve(process.cwd(), "../neo4j/examples/01-example-data.cypher");
 }
 
 async function isDemoDataMissing(neo4jDriver: Driver) {

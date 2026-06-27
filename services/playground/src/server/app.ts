@@ -2,7 +2,7 @@ import cors from "cors";
 import express, { type Request, type Response } from "express";
 import { backends } from "../shared/examples";
 import { parseWindowQuery, PlaygroundParseError } from "../shared/parser";
-import type { ApiErrorResponse, BackendId, RunRequest } from "../shared/types";
+import type { ApiErrorResponse, BackendId, ParseRequest, RunRequest } from "../shared/types";
 import { getNeo4jDriver } from "./neo4jClient";
 import { apocBackend } from "./backends/apocBackend";
 import { sqliteBackend } from "./backends/sqliteBackend";
@@ -43,7 +43,8 @@ export function createApp(options: CreateAppOptions = {}) {
   app.post("/api/parse", (request, response) => {
     try {
       const query = readQuery(request);
-      response.json({ parse: parseWindowQuery(query) });
+      const includePartitionId = readIncludePartitionId(request.body as Partial<ParseRequest>);
+      response.json({ parse: parseWindowQuery(query, { includePartitionId }) });
     } catch (error) {
       sendApiError(response, error);
     }
@@ -58,7 +59,8 @@ export function createApp(options: CreateAppOptions = {}) {
         throw new PlaygroundParseError("Unknown backend selected.");
       }
 
-      const parsed = parseWindowQuery(query);
+      const includePartitionId = backendId === "apoc" && readIncludePartitionId(body);
+      const parsed = parseWindowQuery(query, { includePartitionId });
       if (parsed.kind === "path-window" && backendId === "neo4j-sqlite") {
         throw new PlaygroundParseError("Path-element windows are supported by the APOC backend only.");
       }
@@ -79,6 +81,10 @@ function readQuery(request: Request) {
     throw new PlaygroundParseError("Request body must include a query string.");
   }
   return query;
+}
+
+function readIncludePartitionId(body: Partial<ParseRequest | RunRequest>) {
+  return body.includePartitionId === true;
 }
 
 function sendApiError(response: Response<ApiErrorResponse>, error: unknown) {

@@ -71,11 +71,12 @@ describe("App", () => {
         }
         if (url.endsWith("/api/parse")) {
           const body = JSON.parse(String(init?.body));
+          const includePartitionId = body.includePartitionId === true;
           if (String(body.query).includes("OVER PATH")) {
             return jsonResponse({
               parse: {
                 kind: "path-window",
-                apocQuery: "CALL apoc.window.runPathRows(...)",
+                apocQuery: annotatedPathApoc(includePartitionId),
                 diagnostics: []
               }
             });
@@ -84,7 +85,7 @@ describe("App", () => {
             parse: {
               kind: "row-window",
               sourceQuery: "MATCH (a:Account) RETURN a.name AS source",
-              apocQuery: "CALL apoc.window.runRows(...)",
+              apocQuery: annotatedRowApoc(includePartitionId),
               sqliteSql: "SELECT ...",
               diagnostics: []
             }
@@ -93,13 +94,18 @@ describe("App", () => {
         if (url.endsWith("/api/run")) {
           const body = JSON.parse(String(init?.body));
           const isSqlite = body.backendId === "neo4j-sqlite";
+          const includePartitionId = !isSqlite && body.includePartitionId === true;
           return jsonResponse({
             backendId: body.backendId,
-            rewrite: isSqlite ? "MATCH (a:Account) RETURN a.name AS source" : "CALL apoc.window.runRows(...)",
+            rewrite: isSqlite ? "MATCH (a:Account) RETURN a.name AS source" : annotatedRowApoc(includePartitionId),
             sourceQuery: "MATCH (a:Account) RETURN a.name AS source",
             sqliteSql: isSqlite ? "SELECT ..." : undefined,
-            columns: ["source", "rankPerSource"],
-            rows: [{ source: "Alice", rankPerSource: 1 }],
+            columns: includePartitionId ? ["source", "rankPerSource", "partitionId"] : ["source", "rankPerSource"],
+            rows: [
+              includePartitionId
+                ? { source: "Alice", rankPerSource: 1, partitionId: 1 }
+                : { source: "Alice", rankPerSource: 1 }
+            ],
             diagnostics: [],
             durationMs: 12,
             timing: {
@@ -125,7 +131,9 @@ describe("App", () => {
     render(<App />);
 
     expect(await screen.findByRole("heading", { name: "GQL Window Playground" })).toBeInTheDocument();
-    await waitFor(() => expectCodeBlockContaining("CALL apoc.window.runRows(...)"));
+    await waitFor(() => expectCodeBlockContaining("CALL apoc.window.runRows("));
+    expectCodeBlockContaining("false // includePartitionId");
+    expectCodeBlockContaining("__gw_rows, // rows");
     expect(document.querySelector(".editor-highlight .tok-keyword")?.textContent).toBe("MATCH");
 
     await user.click(screen.getByRole("button", { name: /run/i }));
@@ -143,13 +151,13 @@ describe("App", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await waitFor(() => expectCodeBlockContaining("CALL apoc.window.runRows(...)"));
+    await waitFor(() => expectCodeBlockContaining("CALL apoc.window.runRows("));
 
     await user.click(screen.getByRole("button", { name: "Neo4j + SQLite" }));
 
     expect(await screen.findByRole("heading", { name: "Neo4j Source Query" })).toBeInTheDocument();
     expectCodeBlockContaining("MATCH (a:Account) RETURN a.name AS source");
-    expect(queryCodeBlockContaining("CALL apoc.window.runRows(...)")).toBeNull();
+    expect(queryCodeBlockContaining("CALL apoc.window.runRows(")).toBeNull();
     expect(screen.getByText("SQLite Window SQL")).toBeInTheDocument();
     expectCodeBlockContaining("SELECT ...");
 
@@ -157,14 +165,47 @@ describe("App", () => {
 
     expect(await screen.findByText("Alice")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Neo4j Source Query" })).toBeInTheDocument();
-    expect(queryCodeBlockContaining("CALL apoc.window.runRows(...)")).toBeNull();
+    expect(queryCodeBlockContaining("CALL apoc.window.runRows(")).toBeNull();
+  });
+
+  test("toggles APOC partition id in the generated call and results", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    await waitFor(() => expectCodeBlockContaining("false // includePartitionId"));
+
+    const groupIdToggle = await screen.findByLabelText("Group id");
+    expect(groupIdToggle).not.toBeChecked();
+
+    await user.click(groupIdToggle);
+
+    expect(groupIdToggle).toBeChecked();
+    await waitFor(() => expectCodeBlockContaining("true // includePartitionId"));
+
+    await user.click(screen.getByRole("button", { name: "Neo4j + SQLite" }));
+
+    expect(await screen.findByRole("heading", { name: "Neo4j Source Query" })).toBeInTheDocument();
+    expect(groupIdToggle).toBeDisabled();
+    expect(groupIdToggle).not.toBeChecked();
+    expect(queryCodeBlockContaining("CALL apoc.window.runRows(")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "APOC" }));
+
+    expect(groupIdToggle).toBeEnabled();
+    expect(groupIdToggle).toBeChecked();
+    await waitFor(() => expectCodeBlockContaining("true // includePartitionId"));
+
+    await user.click(screen.getByRole("button", { name: /run/i }));
+
+    expect(await screen.findByText("partitionId")).toBeInTheDocument();
+    expect(screen.getAllByText("1").length).toBeGreaterThan(1);
   });
 
   test("does not show APOC path rewrites while SQLite is selected", async () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await waitFor(() => expectCodeBlockContaining("CALL apoc.window.runRows(...)"));
+    await waitFor(() => expectCodeBlockContaining("CALL apoc.window.runRows("));
     await user.click(screen.getByRole("button", { name: "Neo4j + SQLite" }));
 
     const pathExample = apiExamples.find((example) => example.id === "path-element-edges");
@@ -173,7 +214,7 @@ describe("App", () => {
 
     expect(await screen.findByRole("heading", { name: "Unsupported Backend" })).toBeInTheDocument();
     expect(screen.getByText("Path-element windows are supported by the APOC backend only.")).toBeInTheDocument();
-    expect(queryCodeBlockContaining("CALL apoc.window.runPathRows(...)")).toBeNull();
+    expect(queryCodeBlockContaining("CALL apoc.window.runPathRows(")).toBeNull();
     expect(screen.getByRole("button", { name: "Run" })).toBeDisabled();
   });
 
@@ -221,10 +262,34 @@ describe("App", () => {
     await user.selectOptions(select, "path-element-edges");
 
     expect(screen.getByDisplayValue(/OVER PATH p EDGES AS e/)).toBeInTheDocument();
-    await waitFor(() => expectCodeBlockContaining("CALL apoc.window.runPathRows(...)"));
+    await waitFor(() => expectCodeBlockContaining("CALL apoc.window.runPathRows("));
+    expectCodeBlockContaining("pathSpec: path expansion parameters");
     expect(screen.getByRole("button", { name: "Run" })).toBeEnabled();
   });
 });
+
+function annotatedRowApoc(includePartitionId: boolean) {
+  return `CALL apoc.window.runRows(
+  __gw_rows, // rows: collected source row bindings
+  {
+    function: 'rank'
+  }, // spec: window function, partition/order/frame
+  ${includePartitionId ? "true" : "false"} // includePartitionId: emit partition/group id
+)`;
+}
+
+function annotatedPathApoc(includePartitionId: boolean) {
+  return `CALL apoc.window.runPathRows(
+  __gw_rows, // rows: collected source row bindings
+  {
+    path: 'p'
+  }, // pathSpec: path expansion parameters
+  {
+    function: 'sum'
+  }, // spec: window function, partition/order/frame
+  ${includePartitionId ? "true" : "false"} // includePartitionId: emit partition/group id
+)`;
+}
 
 function expectCodeBlockContaining(text: string) {
   expect(queryCodeBlockContaining(text)).not.toBeNull();

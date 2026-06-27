@@ -137,6 +137,38 @@ button {
   cursor: not-allowed;
 }
 
+.flag-toggle {
+  height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 11px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 720;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.flag-toggle input {
+  width: 15px;
+  height: 15px;
+  accent-color: var(--teal);
+  cursor: pointer;
+}
+
+.flag-toggle.disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.flag-toggle.disabled input {
+  cursor: not-allowed;
+}
+
 .icon-button,
 .run-button {
   height: 38px;
@@ -527,6 +559,7 @@ td code {
   }
 
   .backend-toggle,
+  .flag-toggle,
   .icon-button,
   .run-button {
     width: 100%;

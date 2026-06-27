@@ -144,6 +144,44 @@ RETURN a.name AS source,
     expect(response.body.columns).toEqual(["source", "position", "amount", "total"]);
   });
 
+  test("passes the partition id option into APOC rewrites", async () => {
+    const adapter: BackendAdapter = {
+      async run(parsed) {
+        return {
+          backendId: "apoc",
+          rewrite: parsed.apocQuery,
+          columns: parsed.visibleColumns,
+          rows: [{ source: "Alice", rankPerSource: 1, partitionId: 1 }],
+          diagnostics: [],
+          durationMs: 1,
+          timing: {
+            sourceQueryMs: 0.5,
+            windowedQueryMs: 1,
+            windowOverheadMs: 0.5,
+            overheadPercentOfSource: 100,
+            measurement: "estimated-apoc"
+          }
+        };
+      }
+    };
+    const app = createApp({ adapters: { apoc: adapter }, driver: {} as never });
+
+    const response = await request(app)
+      .post("/api/run")
+      .send({
+        backendId: "apoc",
+        includePartitionId: true,
+        query: `MATCH (a:Account)-[t:TRANSFER]->(b:Account)
+RETURN a.name AS source,
+       rank() OVER (PARTITION BY a ORDER BY t.amount DESC) AS rankPerSource
+ORDER BY source`
+      })
+      .expect(200);
+
+    expect(response.body.rewrite).toContain("true // includePartitionId");
+    expect(response.body.columns).toContain("partitionId");
+  });
+
   test("reports that SQLite cannot run path windows", async () => {
     const app = createApp();
     const response = await request(app)

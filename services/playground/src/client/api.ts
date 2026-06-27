@@ -1,8 +1,10 @@
 import type {
   BackendInfo,
   BackendId,
+  ParseRequest,
   ParseResponse,
   PlaygroundExample,
+  RunRequest,
   RunResponse
 } from "../shared/types";
 
@@ -16,17 +18,19 @@ export async function fetchBackends() {
   return payload.backends;
 }
 
-export async function parseQuery(query: string) {
+export async function parseQuery(query: string, includePartitionId = false) {
+  const body: ParseRequest = { query, includePartitionId };
   return requestJson<ParseResponse>("/api/parse", {
     method: "POST",
-    body: JSON.stringify({ query })
+    body: JSON.stringify(body)
   });
 }
 
-export async function runQuery(query: string, backendId: BackendId) {
+export async function runQuery(query: string, backendId: BackendId, includePartitionId = false) {
+  const body: RunRequest = { query, backendId, includePartitionId };
   return requestJson<RunResponse>("/api/run", {
     method: "POST",
-    body: JSON.stringify({ query, backendId })
+    body: JSON.stringify(body)
   });
 }
 

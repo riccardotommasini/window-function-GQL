@@ -27,7 +27,11 @@ export class PlaygroundParseError extends Error {
   }
 }
 
-export function parseWindowQuery(query: string): ParseResult {
+export interface ParseWindowQueryOptions {
+  includePartitionId?: boolean;
+}
+
+export function parseWindowQuery(query: string, options: ParseWindowQueryOptions = {}): ParseResult {
   const originalQuery = query.trim().replace(/;+\s*$/, "");
   if (!originalQuery) {
     throw new PlaygroundParseError("Enter a query before parsing.");
@@ -83,7 +87,8 @@ export function parseWindowQuery(query: string): ParseResult {
         finalOrderByItems,
         pathVariable: window.path.pathVariable,
         elementKind: window.path.elementKind,
-        elementAlias: window.path.elementAlias
+        elementAlias: window.path.elementAlias,
+        includePartitionId: options.includePartitionId === true
       });
     } catch (error) {
       throw new PlaygroundParseError(error instanceof Error ? error.message : "Path-window rewrite failed.");
@@ -98,7 +103,8 @@ export function parseWindowQuery(query: string): ParseResult {
     visibleProjections,
     window,
     finalOrderBy,
-    finalOrderByItems
+    finalOrderByItems,
+    includePartitionId: options.includePartitionId === true
   });
 }
 

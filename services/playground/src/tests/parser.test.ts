@@ -35,11 +35,26 @@ describe("parseWindowQuery", () => {
     expect(parsed.sourceQuery).toContain("RETURN a.name AS `source`");
     expect(parsed.apocQuery).toContain("WITH a.name AS `source`");
     expect(parsed.apocQuery).toContain("CALL apoc.window.runRows");
-    expect(parsed.apocQuery).toContain(`CALL apoc.window.runRows(\n  __gw_rows,\n  {`);
+    expect(parsed.apocQuery).toContain("__gw_rows, // rows: collected source row bindings");
+    expect(parsed.apocQuery).toContain("}, // spec: window function, partition/order/frame");
+    expect(parsed.apocQuery).toContain("false // includePartitionId");
     expect(parsed.apocQuery).toContain("function: 'sum'");
     expect(parsed.apocQuery).toContain("ROWS");
     expect(parsed.apocQuery).toContain("RETURN __gw_row.`source` AS `source`");
     expect(parsed.apocQuery).not.toContain("__gw_partition_0 AS `__gw_partition_0`");
+  });
+
+  test("can emit APOC partition ids when requested", () => {
+    const parsed = parseWindowQuery(examples[0].query, { includePartitionId: true });
+    expect(parsed.kind).toBe("row-window");
+    if (parsed.kind !== "row-window") {
+      return;
+    }
+
+    expect(parsed.visibleColumns).toContain("partitionId");
+    expect(parsed.apocQuery).toContain("true // includePartitionId");
+    expect(parsed.apocQuery).toContain("__gw_row.`partitionId` AS `partitionId`");
+    expect(parsed.sqliteSql).not.toContain("partitionId");
   });
 
   test("parses path-window syntax and rewrites to runPathRows", () => {
@@ -67,7 +82,10 @@ describe("parseWindowQuery", () => {
       orderBy: [{ column: "position", direction: "ASC" }]
     });
     expect(parsed.apocQuery).toContain("CALL apoc.window.runPathRows");
-    expect(parsed.apocQuery).toContain(`CALL apoc.window.runPathRows(\n  __gw_rows,\n  {`);
+    expect(parsed.apocQuery).toContain("__gw_rows, // rows: collected source row bindings");
+    expect(parsed.apocQuery).toContain("}, // pathSpec: path expansion parameters");
+    expect(parsed.apocQuery).toContain("}, // spec: window function, partition/order/frame");
+    expect(parsed.apocQuery).toContain("false // includePartitionId");
     expect(parsed.apocQuery).toContain(`project: [\n      {`);
   });
 

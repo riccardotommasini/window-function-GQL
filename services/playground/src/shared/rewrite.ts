@@ -22,6 +22,7 @@ interface RowWindowArtifactInput {
   window: WindowExpressionAst;
   finalOrderBy?: string;
   finalOrderByItems: OrderItem[];
+  includePartitionId?: boolean;
 }
 
 interface PathWindowArtifactInput extends RowWindowArtifactInput {
@@ -45,17 +46,23 @@ interface PathColumnPlan {
   spec: WindowSpecLiteral;
 }
 
+const PARTITION_ID_COLUMN = "partitionId";
+
 export function buildRowWindowArtifacts(input: RowWindowArtifactInput): RowWindowParseResult {
+  const includePartitionId = input.includePartitionId === true;
   const { hiddenColumns, spec } = buildColumnPlan(input.visibleProjections, input.window);
   const sourceColumns = [
     ...input.visibleProjections.map((projection) => projection.alias),
     ...hiddenColumns.map((column) => column.alias)
   ];
-  const visibleColumns = [...input.visibleProjections.map((projection) => projection.alias), input.window.alias];
+  const baseVisibleColumns = [...input.visibleProjections.map((projection) => projection.alias), input.window.alias];
+  const visibleColumns = includePartitionId
+    ? [...baseVisibleColumns, PARTITION_ID_COLUMN]
+    : baseVisibleColumns;
   const sourceQuery = buildSourceQuery(input.preamble, input.visibleProjections, hiddenColumns, "RETURN");
   const apocSourceQuery = buildSourceQuery(input.preamble, input.visibleProjections, hiddenColumns, "WITH");
-  const apocQuery = buildApocQuery(apocSourceQuery, sourceColumns, visibleColumns, input.finalOrderBy, spec);
-  const sqliteSql = buildSqliteSql(visibleColumns, input.finalOrderByItems, spec);
+  const apocQuery = buildApocQuery(apocSourceQuery, sourceColumns, visibleColumns, input.finalOrderBy, spec, includePartitionId);
+  const sqliteSql = buildSqliteSql(baseVisibleColumns, input.finalOrderByItems, spec);
 
   return {
     kind: "row-window",
@@ -79,16 +86,20 @@ export function buildRowWindowArtifacts(input: RowWindowArtifactInput): RowWindo
 }
 
 export function buildPathWindowArtifacts(input: PathWindowArtifactInput): PathWindowParseResult {
+  const includePartitionId = input.includePartitionId === true;
   const plan = buildPathColumnPlan(input);
   const sourceColumns = [
     ...plan.sourceProjections.map((projection) => projection.alias),
     ...plan.hiddenSourceColumns.map((column) => column.alias)
   ];
-  const visibleColumns = [
+  const baseVisibleColumns = [
     ...plan.sourceProjections.map((projection) => projection.alias),
     ...plan.pathProjections.map((projection) => projection.alias),
     input.window.alias
   ];
+  const visibleColumns = includePartitionId
+    ? [...baseVisibleColumns, PARTITION_ID_COLUMN]
+    : baseVisibleColumns;
   const sourceQuery = buildSourceQuery(input.preamble, plan.sourceProjections, plan.hiddenSourceColumns, "RETURN");
   const apocSourceQuery = buildSourceQuery(input.preamble, plan.sourceProjections, plan.hiddenSourceColumns, "WITH");
   const apocQuery = buildPathApocQuery(
@@ -97,7 +108,8 @@ export function buildPathWindowArtifacts(input: PathWindowArtifactInput): PathWi
     visibleColumns,
     input.finalOrderBy,
     plan.pathSpec,
-    plan.spec
+    plan.spec,
+    includePartitionId
   );
 
   return {
@@ -376,7 +388,8 @@ function buildApocQuery(
   sourceColumns: string[],
   visibleColumns: string[],
   finalOrderBy: string | undefined,
-  spec: WindowSpecLiteral
+  spec: WindowSpecLiteral,
+  includePartitionId: boolean
 ) {
   const rowMap = mapLiteral(
     sourceColumns.map((column) => `${quoteCypherIdentifier(column)}: ${quoteCypherIdentifier(column)}`)
@@ -390,9 +403,9 @@ function buildApocQuery(
     `WITH collect(${rowMap}) AS __gw_rows`,
     [
       "CALL apoc.window.runRows(",
-      "  __gw_rows,",
-      `${indentBlock(specToCypherLiteral(spec), 2)},`,
-      "  false",
+      "  __gw_rows, // rows: collected source row bindings",
+      `${indentBlock(specToCypherLiteral(spec), 2)}, // spec: window function, partition/order/frame`,
+      `  ${includePartitionId ? "true" : "false"} // includePartitionId: emit partition/group id`,
       ")"
     ].join("\n"),
     "YIELD row AS __gw_row",
@@ -409,7 +422,8 @@ function buildPathApocQuery(
   visibleColumns: string[],
   finalOrderBy: string | undefined,
   pathSpec: PathSpecLiteral,
-  spec: WindowSpecLiteral
+  spec: WindowSpecLiteral,
+  includePartitionId: boolean
 ) {
   const rowMap = mapLiteral(
     sourceColumns.map((column) => `${quoteCypherIdentifier(column)}: ${quoteCypherIdentifier(column)}`)
@@ -423,10 +437,10 @@ function buildPathApocQuery(
     `WITH collect(${rowMap}) AS __gw_rows`,
     [
       "CALL apoc.window.runPathRows(",
-      "  __gw_rows,",
-      `${indentBlock(pathSpecToCypherLiteral(pathSpec), 2)},`,
-      `${indentBlock(specToCypherLiteral(spec), 2)},`,
-      "  false",
+      "  __gw_rows, // rows: collected source row bindings",
+      `${indentBlock(pathSpecToCypherLiteral(pathSpec), 2)}, // pathSpec: path expansion parameters`,
+      `${indentBlock(specToCypherLiteral(spec), 2)}, // spec: window function, partition/order/frame`,
+      `  ${includePartitionId ? "true" : "false"} // includePartitionId: emit partition/group id`,
       ")"
     ].join("\n"),
     "YIELD row AS __gw_row",

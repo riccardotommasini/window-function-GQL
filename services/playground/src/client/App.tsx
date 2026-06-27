@@ -23,6 +23,8 @@ export function App() {
   const [isParsing, setIsParsing] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
   const [isReloadingExamples, setIsReloadingExamples] = useState(false);
+  const [includePartitionId, setIncludePartitionId] = useState(false);
+  const apocIncludePartitionId = backendId === "apoc" && includePartitionId;
 
   useEffect(() => {
     let isMounted = true;
@@ -81,7 +83,7 @@ export function App() {
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
       setIsParsing(true);
-      parseQuery(query)
+      parseQuery(query, apocIncludePartitionId)
         .then((response) => {
           if (controller.signal.aborted) {
             return;
@@ -107,11 +109,11 @@ export function App() {
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [query]);
+  }, [apocIncludePartitionId, query]);
 
   useEffect(() => {
     setRunResult(null);
-  }, [query]);
+  }, [apocIncludePartitionId, query]);
 
   const selectedExample = useMemo(
     () => examples.find((example) => example.id === selectedExampleId) ?? null,
@@ -180,7 +182,7 @@ export function App() {
     }
     setIsRunning(true);
     setStatus("Running");
-    runQuery(query, backendId)
+    runQuery(query, backendId, apocIncludePartitionId)
       .then((result) => {
         setRunResult(result);
         setStatus(`Returned ${result.rows.length} row${result.rows.length === 1 ? "" : "s"} in ${result.durationMs} ms`);
@@ -190,7 +192,7 @@ export function App() {
         setStatus(error instanceof Error ? error.message : "Run failed.");
       })
       .finally(() => setIsRunning(false));
-  }, [backendId, canRun, query]);
+  }, [apocIncludePartitionId, backendId, canRun, query]);
 
   return (
     <main className="app-shell">
@@ -234,6 +236,18 @@ export function App() {
               );
             })}
           </div>
+          <label
+            className={backendId === "apoc" ? "flag-toggle" : "flag-toggle disabled"}
+            title="Pass includePartitionId to the APOC procedure"
+          >
+            <input
+              type="checkbox"
+              checked={apocIncludePartitionId}
+              disabled={backendId !== "apoc"}
+              onChange={(event) => setIncludePartitionId(event.target.checked)}
+            />
+            <span>Group id</span>
+          </label>
           <button className="icon-button subtle" type="button" onClick={resetExample} title="Reset example">
             <RotateCcw aria-hidden="true" size={16} />
             <span>Reset</span>

@@ -151,6 +151,11 @@ export interface PathWindowParseResult {
 
 export type ParseResult = RowWindowParseResult | PathWindowParseResult;
 
+export interface ParseRequest {
+  query: string;
+  includePartitionId?: boolean;
+}
+
 export interface ParseResponse {
   parse: ParseResult;
 }
@@ -158,6 +163,7 @@ export interface ParseResponse {
 export interface RunRequest {
   query: string;
   backendId: BackendId;
+  includePartitionId?: boolean;
 }
 
 export type ExecutionTimingMeasurement = "estimated-apoc" | "measured-sqlite";

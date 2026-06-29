@@ -1,8 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Braces, CheckCircle2, Database, Play, RefreshCw, RotateCcw, Table2 } from "lucide-react";
+import {
+  AlertTriangle,
+  Braces,
+  CheckCircle2,
+  CircleHelp,
+  Database,
+  Play,
+  RefreshCw,
+  RotateCcw,
+  Table2
+} from "lucide-react";
 import { fetchBackends, fetchExamples, parseQuery, runQuery } from "./api";
 import type { BackendId, BackendInfo, ParseResult, PlaygroundExample, RunResponse } from "../shared/types";
 import { EditorPanel } from "./components/EditorPanel";
+import { GuidedTour, rememberGuidedTourSeen, shouldOpenGuidedTour, TOUR_STEPS } from "./components/GuidedTour";
 import { ResultsTable } from "./components/ResultsTable";
 import { RewritePanel } from "./components/RewritePanel";
 import { StatusStrip } from "./components/StatusStrip";
@@ -24,6 +35,8 @@ export function App() {
   const [isRunning, setIsRunning] = useState(false);
   const [isReloadingExamples, setIsReloadingExamples] = useState(false);
   const [includePartitionId, setIncludePartitionId] = useState(false);
+  const [isTourOpen, setIsTourOpen] = useState(shouldOpenGuidedTour);
+  const [tourStepIndex, setTourStepIndex] = useState(0);
   const apocIncludePartitionId = backendId === "apoc" && includePartitionId;
 
   useEffect(() => {
@@ -194,8 +207,22 @@ export function App() {
       .finally(() => setIsRunning(false));
   }, [apocIncludePartitionId, backendId, canRun, query]);
 
+  const openTour = useCallback(() => {
+    setTourStepIndex(0);
+    setIsTourOpen(true);
+  }, []);
+
+  const dismissTour = useCallback(() => {
+    rememberGuidedTourSeen();
+    setIsTourOpen(false);
+  }, []);
+
+  const shellClassName = ["app-shell", isTourOpen ? "tour-active" : "", isTourOpen ? TOUR_STEPS[tourStepIndex]?.targetClass : ""]
+    .filter(Boolean)
+    .join(" ");
+
   return (
-    <main className="app-shell">
+    <main className={shellClassName}>
       <header className="topbar">
         <div className="brand">
           <Database aria-hidden="true" size={22} />
@@ -262,6 +289,10 @@ export function App() {
             <RefreshCw aria-hidden="true" size={16} />
             <span>{isReloadingExamples ? "Reloading" : "Reload"}</span>
           </button>
+          <button className="icon-button subtle" type="button" onClick={openTour} title="Open guided tour">
+            <CircleHelp aria-hidden="true" size={16} />
+            <span>Tour</span>
+          </button>
           <button className="run-button" type="button" onClick={execute} disabled={!canRun}>
             <Play aria-hidden="true" size={17} fill="currentColor" />
             <span>{isRunning ? "Running" : "Run"}</span>
@@ -294,21 +325,8 @@ export function App() {
       {runResult ? <TimingStrip timing={runResult.timing} /> : null}
 
       <section className="workspace">
-        <EditorPanel value={query} onChange={setQuery} disabled={loadState === "loading"} />
-        <div className="right-rail">
-          <RewritePanel
-            title={rewriteTitle}
-            rewrite={activeRewrite}
-            emptyText={
-              backendId === "neo4j-sqlite"
-                ? "Waiting for a row-window query that can be translated to SQLite."
-                : undefined
-            }
-            sqliteSql={sqliteSql}
-            diagnostics={diagnostics}
-            parseKind={parseResult?.kind}
-            showDiagnostics={sqliteUnsupportedPath}
-          />
+        <div className="left-rail">
+          <EditorPanel value={query} onChange={setQuery} disabled={loadState === "loading"} />
           <section className="panel results-panel" aria-labelledby="results-title">
             <div className="panel-header">
               <div className="panel-title">
@@ -320,7 +338,26 @@ export function App() {
             <ResultsTable columns={runResult?.columns ?? []} rows={runResult?.rows ?? []} />
           </section>
         </div>
+        <RewritePanel
+          title={rewriteTitle}
+          rewrite={activeRewrite}
+          emptyText={
+            backendId === "neo4j-sqlite"
+              ? "Waiting for a row-window query that can be translated to SQLite."
+              : undefined
+          }
+          sqliteSql={sqliteSql}
+          diagnostics={diagnostics}
+          parseKind={parseResult?.kind}
+          showDiagnostics={sqliteUnsupportedPath}
+        />
       </section>
+      <GuidedTour
+        open={isTourOpen}
+        stepIndex={tourStepIndex}
+        onStepChange={setTourStepIndex}
+        onDismiss={dismissTour}
+      />
     </main>
   );
 }

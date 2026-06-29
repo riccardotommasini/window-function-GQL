@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { App } from "../client/App";
 import type { PlaygroundExample } from "../shared/types";
 
+const tourStorageKey = "gql-window-playground.tourSeen";
+
 const baseExamples: PlaygroundExample[] = [
   {
     id: "rank-source-node",
@@ -53,6 +55,8 @@ let apiExamples: PlaygroundExample[];
 
 describe("App", () => {
   beforeEach(() => {
+    window.localStorage.clear();
+    window.localStorage.setItem(tourStorageKey, "1");
     apiExamples = baseExamples.map((example) => ({ ...example, supportedBackends: [...example.supportedBackends], tags: [...example.tags] }));
     vi.stubGlobal(
       "fetch",
@@ -123,7 +127,53 @@ describe("App", () => {
   });
 
   afterEach(() => {
+    window.localStorage.clear();
     vi.unstubAllGlobals();
+  });
+
+  test("shows the guided tour for first-time users and persists dismissal", async () => {
+    const user = userEvent.setup();
+    window.localStorage.removeItem(tourStorageKey);
+
+    render(<App />);
+
+    expect(await screen.findByRole("dialog", { name: "Why this exists" })).toBeInTheDocument();
+    expect(screen.getByText(/what a window function means over a property graph/i)).toBeInTheDocument();
+    expect(document.querySelector(".tour-step-topbar")).not.toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Next" }));
+
+    expect(await screen.findByRole("dialog", { name: "Queries are fixtures" })).toBeInTheDocument();
+    expect(screen.getByText(/pairs a query with a preloaded demo database/i)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Skip" }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    expect(window.localStorage.getItem(tourStorageKey)).toBe("1");
+  });
+
+  test("reopens the guided tour from the toolbar", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "GQL Window Playground" })).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Tour" }));
+
+    expect(await screen.findByRole("dialog", { name: "Why this exists" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByRole("button", { name: "Next" }));
+    await user.click(screen.getByRole("button", { name: "Next" }));
+
+    expect(screen.getByRole("dialog", { name: "Path-element windows" })).toBeInTheDocument();
+    expect(screen.getByText("sum(e.amount) OVER PATH p EDGES AS e (...)")).toBeInTheDocument();
+
+    await user.click(screen.getByLabelText("Close guided tour"));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
   test("loads examples and renders run results", async () => {
@@ -145,6 +195,21 @@ describe("App", () => {
     expect(screen.getByText("Overhead")).toBeInTheDocument();
     expect(screen.getByText("+4.00 ms")).toBeInTheDocument();
     expect(screen.getByText("+50.0%")).toBeInTheDocument();
+  });
+
+  test("places results below the new syntax editor in the left rail", async () => {
+    render(<App />);
+
+    expect(await screen.findByRole("heading", { name: "GQL Window Playground" })).toBeInTheDocument();
+
+    const workspace = document.querySelector(".workspace");
+    const leftRail = document.querySelector(".left-rail");
+    const rewritePanel = document.querySelector(".rewrite-panel");
+
+    expect(workspace?.children[0]).toBe(leftRail);
+    expect(workspace?.children[1]).toBe(rewritePanel);
+    expect(leftRail?.children[0]).toHaveClass("editor-panel");
+    expect(leftRail?.children[1]).toHaveClass("results-panel");
   });
 
   test("shows source Cypher instead of APOC rewrite for the SQLite backend", async () => {

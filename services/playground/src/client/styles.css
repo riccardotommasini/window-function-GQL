@@ -297,15 +297,15 @@ button {
 
 .workspace {
   display: grid;
-  grid-template-columns: minmax(360px, 0.94fr) minmax(430px, 1.06fr);
+  grid-template-columns: minmax(390px, 0.96fr) minmax(430px, 1.04fr);
   gap: 12px;
   min-height: calc(100vh - 152px);
 }
 
-.right-rail {
+.left-rail {
   min-width: 0;
   display: grid;
-  grid-template-rows: minmax(260px, 0.92fr) minmax(240px, 1.08fr);
+  grid-template-rows: minmax(330px, 0.98fr) minmax(220px, 0.68fr);
   gap: 12px;
 }
 
@@ -583,8 +583,8 @@ td code {
     min-height: 460px;
   }
 
-  .right-rail {
-    grid-template-rows: minmax(320px, auto) minmax(260px, auto);
+  .left-rail {
+    grid-template-rows: minmax(360px, auto) minmax(260px, auto);
   }
 }
 
@@ -634,5 +634,189 @@ td code {
   .code-output,
   .code-highlight {
     font-size: 12px;
+  }
+}
+
+.tour-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgba(15, 30, 36, 0.26);
+  pointer-events: none;
+}
+
+.tour-popover {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 80;
+  width: min(430px, calc(100vw - 36px));
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  box-shadow: 0 24px 56px rgba(20, 36, 45, 0.22);
+  outline: none;
+}
+
+.tour-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.tour-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--teal);
+  font-size: 11px;
+  font-weight: 820;
+  text-transform: uppercase;
+}
+
+.tour-popover h2 {
+  margin: 5px 0 0;
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1.25;
+  font-weight: 760;
+  letter-spacing: 0;
+}
+
+.tour-popover p {
+  margin: 0;
+  color: #34434a;
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.tour-close {
+  width: 32px;
+  height: 32px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  color: var(--muted);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.tour-close:hover {
+  color: var(--text);
+}
+
+.tour-syntax {
+  display: block;
+  padding: 9px 10px;
+  overflow-wrap: anywhere;
+  color: #12232a;
+  background: #f7fafb;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font-family: "SFMono-Regular", "Cascadia Code", "Liberation Mono", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.tour-progress {
+  display: grid;
+  gap: 7px;
+}
+
+.tour-progress span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 760;
+}
+
+.tour-progress-track {
+  height: 5px;
+  overflow: hidden;
+  background: var(--surface-2);
+  border-radius: 999px;
+}
+
+.tour-progress-fill {
+  height: 100%;
+  background: var(--teal);
+  border-radius: inherit;
+  transition: width 160ms ease;
+}
+
+.tour-actions,
+.tour-step-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tour-actions {
+  justify-content: space-between;
+}
+
+.tour-step-actions {
+  justify-content: flex-end;
+}
+
+.tour-actions .icon-button,
+.tour-actions .run-button {
+  width: auto;
+  justify-content: center;
+}
+
+.tour-active .topbar,
+.tour-active .meta-row,
+.tour-active .editor-panel,
+.tour-active .rewrite-panel,
+.tour-active .results-panel {
+  transition:
+    outline-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.tour-step-topbar .topbar,
+.tour-step-meta .meta-row,
+.tour-step-editor .editor-panel,
+.tour-step-rewrite .rewrite-panel,
+.tour-step-results .results-panel {
+  position: relative;
+  z-index: 50;
+  outline: 2px solid var(--teal);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 7px rgba(0, 108, 103, 0.14), var(--shadow);
+}
+
+@media (max-width: 560px) {
+  .tour-popover {
+    right: 10px;
+    bottom: 10px;
+    left: 10px;
+    width: auto;
+    max-height: calc(100vh - 20px);
+    overflow: auto;
+    padding: 14px;
+  }
+
+  .tour-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .tour-step-actions,
+  .tour-actions .icon-button,
+  .tour-actions .run-button {
+    width: 100%;
+  }
+
+  .tour-step-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
   }
 }
